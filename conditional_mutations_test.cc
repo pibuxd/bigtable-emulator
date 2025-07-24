@@ -1,4 +1,4 @@
-#include "google/cloud/bigtable/emulator/table.h"
+#include "table.h"
 #include "google/cloud/internal/make_status.h"
 #include "google/cloud/status.h"
 #include "google/cloud/status_or.h"

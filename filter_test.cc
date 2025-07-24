@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "google/cloud/bigtable/emulator/filter.h"
-#include "google/cloud/bigtable/emulator/cell_view.h"
-#include "google/cloud/bigtable/emulator/range_set.h"
-#include "google/cloud/bigtable/emulator/test_util.h"
+#include "filter.h"
+#include "cell_view.h"
+#include "range_set.h"
+#include "test_util.h"
 #include "google/cloud/status.h"
 #include "google/cloud/status_or.h"
 #include "google/cloud/testing_util/chrono_literals.h"

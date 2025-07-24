@@ -11,8 +11,16 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#
 
-bigtable_emulator_programs = [
-    "emulator.cc",
-]
+"""Load dependencies needed to use the google-cloud-cpp libraries."""
+
+def gl_cpp_bzlmod0(name = None):
+    """Loads dependencies need to compile the google-cloud-cpp libraries.
+
+    This is a workaround until all dependencies of `google-cloud-cpp` can
+    be managed via bzlmod.
+
+    Args:
+        name: Unused. It is conventional to provide a `name` argument to all
+            workspace functions.
+    """

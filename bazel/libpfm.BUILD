@@ -1,4 +1,4 @@
-# Copyright 2024 Google LLC
+# Copyright 2023 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,8 +11,23 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#
 
-bigtable_emulator_programs = [
-    "emulator.cc",
-]
+load("@rules_foreign_cc//foreign_cc:defs.bzl", "make")
+
+filegroup(
+    name = "pfm_srcs",
+    srcs = glob(["**"]),
+)
+
+make(
+    name = "libpfm",
+    copts = [
+        "-Wno-format-truncation",
+        "-Wno-use-after-free",
+    ],
+    lib_name = "libpfm",
+    lib_source = ":pfm_srcs",
+    visibility = [
+        "//visibility:public",
+    ],
+)

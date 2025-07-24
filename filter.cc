@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "google/cloud/bigtable/emulator/filter.h"
-#include "google/cloud/bigtable/emulator/range_set.h"
+#include "filter.h"
+#include "range_set.h"
 #include "google/cloud/bigtable/internal/google_bytes_traits.h"
 #include "google/cloud/internal/invoke_result.h"
 #include "google/cloud/internal/make_status.h"

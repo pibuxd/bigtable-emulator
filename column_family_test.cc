@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "google/cloud/bigtable/emulator/column_family.h"
-#include "google/cloud/bigtable/emulator/filter.h"
-#include "google/cloud/bigtable/emulator/range_set.h"
+#include "column_family.h"
+#include "filter.h"
+#include "range_set.h"
 #include "google/cloud/testing_util/chrono_literals.h"
 #include <google/bigtable/v2/data.pb.h>
 #include <gtest/gtest.h>

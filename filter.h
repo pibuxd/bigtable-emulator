@@ -15,8 +15,8 @@
 #ifndef GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_FILTER_H
 #define GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_FILTER_H
 
-#include "google/cloud/bigtable/emulator/cell_view.h"
-#include "google/cloud/bigtable/emulator/range_set.h"
+#include "cell_view.h"
+#include "range_set.h"
 #include "google/cloud/status_or.h"
 #include <google/bigtable/v2/data.pb.h>
 #include <absl/types/internal/variant.h>

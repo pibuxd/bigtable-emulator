@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "google/cloud/bigtable/emulator/column_family.h"
-#include "google/cloud/bigtable/emulator/cell_view.h"
-#include "google/cloud/bigtable/emulator/filter.h"
-#include "google/cloud/bigtable/emulator/filtered_map.h"
+#include "column_family.h"
+#include "cell_view.h"
+#include "filter.h"
+#include "filtered_map.h"
 #include "google/cloud/internal/big_endian.h"
 #include "google/cloud/internal/make_status.h"
 #include "google/cloud/status_or.h"

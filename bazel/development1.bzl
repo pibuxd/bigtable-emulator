@@ -1,4 +1,4 @@
-# Copyright 2024 Google LLC
+# Copyright 2023 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,8 +11,19 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#
 
-bigtable_emulator_programs = [
-    "emulator.cc",
-]
+"""Load dependencies needed for google-cloud-cpp development / Phase 1."""
+
+load("@com_google_benchmark//:bazel/benchmark_deps.bzl", "benchmark_deps")
+
+def gl_cpp_development1(name = None):
+    """Loads dependencies needed to develop the google-cloud-cpp libraries.
+
+    This function assumes the repositories needed by our dependencies are loaded
+
+
+    Args:
+        name: Unused. It is conventional to provide a `name` argument to all
+            workspace functions.
+    """
+    benchmark_deps()

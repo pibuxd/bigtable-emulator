@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "google/cloud/bigtable/emulator/column_family.h"
-#include "google/cloud/bigtable/emulator/table.h"
-#include "google/cloud/bigtable/emulator/test_util.h"
+#include "column_family.h"
+#include "table.h"
+#include "test_util.h"
 #include "google/cloud/internal/big_endian.h"
 #include "google/cloud/internal/make_status.h"
 #include "google/cloud/status.h"

@@ -1,0 +1,27 @@
+# Copyright 2025 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+load(":bigtable_emulator_common.bzl", "bigtable_emulator_common_hdrs", "bigtable_emulator_common_srcs")
+load(":bigtable_emulator_programs.bzl", "bigtable_emulator_programs")
+load(":bigtable_emulator_test_common.bzl", "bigtable_emulator_test_common_hdrs", "bigtable_emulator_test_common_srcs")
+load(":bigtable_emulator_unit_tests.bzl", "bigtable_emulator_unit_tests")
+
+cc_library(
+    name = "bigtable_emulator_common",
+    srcs = bigtable_emulator_common_srcs,
+    hdrs = bigtable_emulator_common_hdrs,
+    deps = [
+        "@google_cloud_cpp//google/cloud/bigtable:google_cloud_cpp_bigtable",
+    ],
+)

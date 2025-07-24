@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "google/cloud/bigtable/emulator/row_streamer.h"
-#include "google/cloud/bigtable/emulator/cell_view.h"
+#include "row_streamer.h"
+#include "cell_view.h"
 #include <google/bigtable/v2/bigtable.pb.h>
 #include <absl/types/optional.h>
 #include <chrono>

@@ -15,13 +15,13 @@
 #ifndef GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_TABLE_H
 #define GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_TABLE_H
 
-#include "google/cloud/bigtable/emulator/column_family.h"
-#include "google/cloud/bigtable/emulator/filter.h"
-#include "google/cloud/bigtable/emulator/range_set.h"
-#include "google/cloud/bigtable/emulator/row_streamer.h"
+#include "column_family.h"
+#include "filter.h"
+#include "range_set.h"
+#include "row_streamer.h"
 #include "google/cloud/status.h"
 #include "google/cloud/status_or.h"
-#include "absl/types/variant.h"
+#include <absl/types/variant.h>
 #include "google/protobuf/repeated_ptr_field.h"
 #include <google/bigtable/admin/v2/bigtable_table_admin.pb.h>
 #include <google/bigtable/admin/v2/table.pb.h>

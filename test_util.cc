@@ -1,5 +1,5 @@
-#include "google/cloud/bigtable/emulator/test_util.h"
-#include "google/cloud/bigtable/emulator/table.h"
+#include "test_util.h"
+#include "table.h"
 #include "google/cloud/status.h"
 #include "google/cloud/status_or.h"
 #include <google/bigtable/admin/v2/table.pb.h>

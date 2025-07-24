@@ -51,7 +51,7 @@ common:macos --repo_env=BAZEL_NO_APPLE_CPP_TOOLCHAIN=1
 test --test_env=GTEST_SHUFFLE --test_env=GTEST_RANDOM_SEED
 
 # By default, build the library with OpenTelemetry
-build --//:enable_opentelemetry
+# build --//:enable_opentelemetry
 
 # Don't show warnings when building external dependencies. This still shows
 # warnings when using these dependencies (say in headers).
@@ -130,4 +130,4 @@ build:msan --action_env=MSAN_OPTIONS=poison_in_dtor=1
 build:msan --linkopt=-L/usr/lib/x86_64-unknown-linux-gnu
 
 # --config otel2: Open Telemetery ABI version 2
-build:otel2 --cxxopt=-DOPENTELEMETRY_ABI_VERSION_NO=2
+# build:otel2 --cxxopt=-DOPENTELEMETRY_ABI_VERSION_NO=2

@@ -15,7 +15,7 @@
 #ifndef GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_FILTERED_MAP_H
 #define GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_FILTERED_MAP_H
 
-#include "google/cloud/bigtable/emulator/range_set.h"
+#include "range_set.h"
 #include <re2/re2.h>
 #include <functional>
 #include <iterator>

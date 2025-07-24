@@ -1,4 +1,4 @@
-# Copyright 2024 Google LLC
+# Copyright 2023 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,8 +11,20 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#
 
-bigtable_emulator_programs = [
-    "emulator.cc",
-]
+package(default_visibility = ["//visibility:public"])
+
+licenses(["notice"])  # Apache 2.0
+
+cc_library(
+    name = "pugixml",
+    srcs = [
+        "src/pugixml.cpp",
+    ],
+    hdrs = [
+        "src/pugiconfig.hpp",
+        "src/pugixml.hpp",
+    ],
+    includes = ["src"],
+    visibility = ["//visibility:public"],
+)

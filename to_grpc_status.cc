@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "google/cloud/bigtable/emulator/to_grpc_status.h"
+#include "to_grpc_status.h"
 #include "google/cloud/status.h"
 #include "google/rpc/status.pb.h"
 #include <google/protobuf/any.pb.h>
