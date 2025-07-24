@@ -19,9 +19,9 @@
 #include "google/cloud/internal/make_status.h"
 #include "google/cloud/status_or.h"
 #include <google/bigtable/v2/data.pb.h>
-#include <absl/types/optional.h>
-#include <absl/types/variant.h>
-#include <re2/re2.h>
+#include "absl/types/optional.h"
+#include "absl/types/variant.h"
+#include "re2/re2.h"
 #include <algorithm>
 #include <cassert>
 #include <cstddef>

@@ -18,7 +18,7 @@
 #include "range_set.h"
 #include "google/cloud/testing_util/chrono_literals.h"
 #include <gtest/gtest.h>
-#include <re2/re2.h>
+#include "re2/re2.h"
 #include <memory>
 #include <ostream>
 #include <sstream>

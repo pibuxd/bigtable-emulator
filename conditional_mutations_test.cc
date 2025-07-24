@@ -6,7 +6,7 @@
 #include <google/bigtable/admin/v2/table.pb.h>
 #include <google/bigtable/v2/bigtable.pb.h>
 #include <google/bigtable/v2/data.pb.h>
-#include <absl/strings/str_format.h>
+#include "absl/strings/str_format.h"
 #include <gtest/gtest.h>
 #include <chrono>
 #include <cstdint>

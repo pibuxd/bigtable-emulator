@@ -21,14 +21,14 @@
 #include "row_streamer.h"
 #include "google/cloud/status.h"
 #include "google/cloud/status_or.h"
-#include <absl/types/variant.h>
+#include "absl/types/variant.h"
 #include "google/protobuf/repeated_ptr_field.h"
 #include <google/bigtable/admin/v2/bigtable_table_admin.pb.h>
 #include <google/bigtable/admin/v2/table.pb.h>
 #include <google/bigtable/v2/bigtable.pb.h>
 #include <google/bigtable/v2/data.pb.h>
 #include <google/protobuf/field_mask.pb.h>
-#include <absl/types/optional.h>
+#include "absl/types/optional.h"
 #include <grpcpp/support/sync_stream.h>
 #include <chrono>
 #include <functional>

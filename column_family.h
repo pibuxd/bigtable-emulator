@@ -21,7 +21,7 @@
 #include "range_set.h"
 #include "google/cloud/internal/big_endian.h"
 #include "google/cloud/status_or.h"
-#include <absl/types/optional.h>
+#include "absl/types/optional.h"
 #include <google/bigtable/admin/v2/types.pb.h>
 #include <google/bigtable/v2/data.pb.h>
 #include <chrono>

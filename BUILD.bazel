@@ -25,3 +25,18 @@ cc_library(
         "@google_cloud_cpp//google/cloud/bigtable:google_cloud_cpp_bigtable",
     ],
 )
+
+cc_binary(
+    name = "emulator",
+    srcs = bigtable_emulator_programs,
+    deps = [
+        ":bigtable_emulator_common",
+        "@com_github_grpc_grpc//:grpc",
+        "@com_github_grpc_grpc//:grpc++",
+        "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/flags:parse",
+        "@com_google_protobuf//:protobuf",
+        "@google_cloud_cpp//:grpc_utils",
+        "@google_cloud_cpp//google/cloud/bigtable:google_cloud_cpp_bigtable",
+    ],
+)

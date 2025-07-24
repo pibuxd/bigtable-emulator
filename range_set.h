@@ -16,7 +16,7 @@
 #define GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_RANGE_SET_H
 
 #include "google/cloud/status_or.h"
-#include <absl/types/variant.h>
+#include "absl/types/variant.h"
 #include <chrono>
 #include <ostream>
 #include <set>

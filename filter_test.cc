@@ -22,10 +22,10 @@
 #include "google/cloud/testing_util/status_matchers.h"
 #include "gmock/gmock.h"
 #include <google/bigtable/v2/data.pb.h>
-#include <absl/types/optional.h>
-#include <absl/types/variant.h>
+#include "absl/types/optional.h"
+#include "absl/types/variant.h"
 #include <gtest/gtest.h>
-#include <re2/re2.h>
+#include "re2/re2.h"
 #include <algorithm>
 #include <chrono>
 #include <cstddef>

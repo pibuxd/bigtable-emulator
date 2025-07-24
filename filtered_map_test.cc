@@ -15,7 +15,7 @@
 #include "filtered_map.h"
 #include "google/cloud/testing_util/chrono_literals.h"
 #include <gtest/gtest.h>
-#include <re2/re2.h>
+#include "re2/re2.h"
 #include <algorithm>
 #include <chrono>
 #include <cstdint>

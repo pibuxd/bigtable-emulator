@@ -16,7 +16,7 @@
 #define GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_FILTERED_MAP_H
 
 #include "range_set.h"
-#include <re2/re2.h>
+#include "re2/re2.h"
 #include <functional>
 #include <iterator>
 #include <memory>

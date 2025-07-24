@@ -19,7 +19,7 @@
 #include "range_set.h"
 #include "google/cloud/status_or.h"
 #include <google/bigtable/v2/data.pb.h>
-#include <absl/types/internal/variant.h>
+#include "absl/types/internal/variant.h"
 #include <functional>
 #include <memory>
 #include <string>

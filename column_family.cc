@@ -21,9 +21,9 @@
 #include "google/cloud/status_or.h"
 #include <google/bigtable/admin/v2/types.pb.h>
 #include <google/bigtable/v2/data.pb.h>
-#include <absl/strings/str_format.h>
-#include <absl/types/optional.h>
-#include <absl/types/variant.h>
+#include "absl/strings/str_format.h"
+#include "absl/types/optional.h"
+#include "absl/types/variant.h"
 #include <cassert>
 #include <chrono>
 #include <cstdint>

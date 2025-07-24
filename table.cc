@@ -29,12 +29,12 @@
 #include <google/bigtable/v2/bigtable.pb.h>
 #include <google/bigtable/v2/data.pb.h>
 #include <google/protobuf/field_mask.pb.h>
-#include <absl/strings/match.h>
-#include <absl/strings/str_format.h>
-#include <absl/types/optional.h>
-#include <absl/types/variant.h>
+#include "absl/strings/match.h"
+#include "absl/strings/str_format.h"
+#include "absl/types/optional.h"
+#include "absl/types/variant.h"
 #include <grpcpp/support/sync_stream.h>
-#include <re2/re2.h>
+#include "re2/re2.h"
 #include <cassert>
 #include <chrono>
 #include <climits>

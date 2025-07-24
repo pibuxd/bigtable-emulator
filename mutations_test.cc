@@ -25,7 +25,7 @@
 #include <google/bigtable/v2/bigtable.pb.h>
 #include <google/bigtable/v2/data.pb.h>
 #include <google/protobuf/text_format.h>
-#include <absl/strings/str_format.h>
+#include "absl/strings/str_format.h"
 #include <gtest/gtest.h>
 #include <chrono>
 #include <cstdint>

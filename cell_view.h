@@ -15,7 +15,7 @@
 #ifndef GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_CELL_VIEW_H
 #define GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_CELL_VIEW_H
 
-#include <absl/types/optional.h>
+#include "absl/types/optional.h"
 #include <chrono>
 #include <functional>
 #include <string>
