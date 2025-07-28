@@ -20,7 +20,7 @@ namespace google {
 namespace cloud {
 namespace bigtable {
 namespace emulator {
-constexpr std::size_t kMaxRowLen = 2 << 21;
+constexpr std::size_t kMaxRowLen = 2 << 11;
 }  // namespace emulator
 }  // namespace bigtable
 }  // namespace cloud
