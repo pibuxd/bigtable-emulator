@@ -23,3 +23,13 @@ bigtable_emulator_unit_tests = [
     "server_test.cc",
     "table_test.cc",
 ]
+
+def gen_cc_tests(srcs, deps = [], copts = []):
+    for src in srcs:
+        test_name = src.replace("/", "_").replace(".cc", "")
+        native.cc_test(
+            name = test_name,
+            srcs = [src],
+            deps = deps,
+            copts = copts,
+        )

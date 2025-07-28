@@ -15,7 +15,7 @@
 load(":bigtable_emulator_common.bzl", "bigtable_emulator_common_hdrs", "bigtable_emulator_common_srcs")
 load(":bigtable_emulator_programs.bzl", "bigtable_emulator_programs")
 load(":bigtable_emulator_test_common.bzl", "bigtable_emulator_test_common_hdrs", "bigtable_emulator_test_common_srcs")
-load(":bigtable_emulator_unit_tests.bzl", "bigtable_emulator_unit_tests")
+load(":bigtable_emulator_unit_tests.bzl", "bigtable_emulator_unit_tests", "gen_cc_tests")
 
 cc_library(
     name = "bigtable_emulator_common",
@@ -38,5 +38,22 @@ cc_binary(
         "@com_google_protobuf//:protobuf",
         "@google_cloud_cpp//:grpc_utils",
         "@google_cloud_cpp//google/cloud/bigtable:google_cloud_cpp_bigtable",
+    ],
+)
+
+gen_cc_tests(
+    srcs = bigtable_emulator_unit_tests,
+    deps = [
+        ":bigtable_emulator_common",
+        "@com_github_grpc_grpc//:grpc",
+        "@com_github_grpc_grpc//:grpc++",
+        "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/flags:parse",
+        "@com_google_googletest//:gtest",
+        "@com_google_googletest//:gtest_main",
+        "@com_google_protobuf//:protobuf",
+        "@google_cloud_cpp//:grpc_utils",
+        "@google_cloud_cpp//google/cloud/bigtable:google_cloud_cpp_bigtable",
+        "@google_cloud_cpp//google/cloud/testing_util:google_cloud_cpp_testing",
     ],
 )
