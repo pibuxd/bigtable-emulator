@@ -15,7 +15,8 @@
 load(":bigtable_emulator_common.bzl", "bigtable_emulator_common_hdrs", "bigtable_emulator_common_srcs")
 load(":bigtable_emulator_programs.bzl", "bigtable_emulator_programs")
 load(":bigtable_emulator_test_common.bzl", "bigtable_emulator_test_common_hdrs", "bigtable_emulator_test_common_srcs")
-load(":bigtable_emulator_unit_tests.bzl", "bigtable_emulator_unit_tests", "gen_cc_tests")
+load(":bigtable_emulator_unit_tests.bzl", "bigtable_emulator_unit_tests")
+load(":funcs.bzl", "gen_cc_tests")
 
 cc_library(
     name = "bigtable_emulator_common",

@@ -12,14 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-bigtable_emulator_unit_tests = [
-    "column_family_test.cc",
-    "conditional_mutations_test.cc",
-    "drop_row_range_test.cc",
-    "filter_test.cc",
-    "filtered_map_test.cc",
-    "mutations_test.cc",
-    "range_set_test.cc",
-    "server_test.cc",
-    "table_test.cc",
-]
+def gen_cc_tests(srcs, deps = [], copts = []):
+    for src in srcs:
+        test_name = src.replace("/", "_").replace(".cc", "")
+        native.cc_test(
+            name = test_name,
+            srcs = [src],
+            deps = deps,
+            copts = copts,
+        )
