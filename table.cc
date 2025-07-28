@@ -792,7 +792,7 @@ Status Table::DropRowRange(
     return Status();
   }
 
-  auto const& row_prefix = request.row_key_prefix();
+  auto const& row_key_prefix = request.row_key_prefix();
   if (request.row_key_prefix().size() > kMaxRowLen) {
     return InvalidArgumentError(
         "The row_key_prefix is longer than 4KiB",
@@ -800,8 +800,7 @@ Status Table::DropRowRange(
             "row_key_prefix size",
             absl::StrFormat("%zu", request.row_key_prefix().size())));
   }
-
-  if (row_prefix.empty()) {
+  if (row_key_prefix.empty()) {
     return InvalidArgumentError(
         "Row prefix provided is empty.",
         GCP_ERROR_INFO().WithMetadata("DropRowRange request",
@@ -809,9 +808,9 @@ Status Table::DropRowRange(
   }
 
   for (auto& cf : column_families_) {
-    for (auto row_it = cf.second->lower_bound(row_prefix);
+    for (auto row_it = cf.second->lower_bound(row_key_prefix);
          row_it != cf.second->end();) {
-      if (absl::StartsWith(row_it->first, row_prefix)) {
+      if (absl::StartsWith(row_it->first, row_key_prefix)) {
         row_it = cf.second->erase(row_it);
       } else {
         break;
