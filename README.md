@@ -20,11 +20,21 @@ bazel build "..."
 bazel test "..."
 ```
 
-### Running the Emulator
+## Running the Emulator
+
+```shell
+bazel run :emulator -- --host=127.0.0.1 --port=8888
+```
+
+or just
 
 ```shell
 bazel run :emulator
 ```
+
+## Using RocksDB
+
+Example in server.cc
 
 ## Contributing changes
 
