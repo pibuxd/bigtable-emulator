@@ -12,18 +12,18 @@ Building the Bigtable emulator requires `bazel`.
 
 ```shell
 cd bigtable-emulator
-bazel build ...
+bazel build "..."
 ```
 ## Running the Unit Tests
 
 ```shell
-bazel test ...
+bazel test "..."
 ```
 
 ### Running the Emulator
 
 ```shell
-bigtable-emulator -p <port>
+bazel run :emulator
 ```
 
 ## Contributing changes
