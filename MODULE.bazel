@@ -80,3 +80,5 @@ git_repository(
     patches = ["//bazel:google_cloud_cpp.patch"],
     patch_args = ["-p1"],
 )
+
+bazel_dep(name = "rocksdb", version = "9.11.2")

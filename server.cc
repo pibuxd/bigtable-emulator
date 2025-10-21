@@ -39,6 +39,9 @@
 #include <string>
 #include <utility>
 
+#include "rocksdb/db.h"
+#include "rocksdb/options.h"
+
 namespace google {
 namespace cloud {
 namespace bigtable {
@@ -369,6 +372,22 @@ StatusOr<std::unique_ptr<EmulatorServer>> CreateDefaultEmulatorServer(
                             .WithMetadata("host", host)
                             .WithMetadata("port", absl::StrCat("%d", port)));
   }
+
+  rocksdb::DB* db;
+  rocksdb::Options options;
+  options.create_if_missing = true;
+
+  // Example code using rocksdb: Open database
+  rocksdb::Status status = rocksdb::DB::Open(options, "/tmp/rocksdb-for-bigtable", &db);
+  if (!status.ok()) {
+      std::cerr << "Error opening RocksDB: " << status.ToString() << "\n";
+      return UnknownError("Failed to open RocksDB",
+                          GCP_ERROR_INFO()
+                              .WithMetadata("host", host)
+                              .WithMetadata("port", absl::StrCat("%d", port)));
+  }
+
+
 
   return std::unique_ptr<EmulatorServer>(default_emulator_server);
 }
