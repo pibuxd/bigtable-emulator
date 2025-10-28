@@ -32,9 +32,26 @@ or just
 bazel run :emulator
 ```
 
+## Connecting to the Emulator
+
+Install [CLI tool - cbt](https://docs.cloud.google.com/bigtable/docs/cbt-overview)
+
+Create `~/.cbtrc` file. Example:
+```
+project = projekcik
+instance = instancyjka
+creds = whatever
+```
+Set env variable. Example:
+```
+export BIGTABLE_EMULATOR_HOST=localhost:8888
+```
+
+
 ## Using RocksDB
 
-Example in server.cc
+Example in `server.cc`
+
 
 ## Contributing changes
 
