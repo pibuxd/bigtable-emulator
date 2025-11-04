@@ -39,8 +39,7 @@
 #include <string>
 #include <utility>
 
-#include "rocksdb/db.h"
-#include "rocksdb/options.h"
+#include "persist/storage.h"
 
 namespace google {
 namespace cloud {
@@ -373,21 +372,37 @@ StatusOr<std::unique_ptr<EmulatorServer>> CreateDefaultEmulatorServer(
                             .WithMetadata("port", absl::StrCat("%d", port)));
   }
 
-  rocksdb::DB* db;
-  rocksdb::Options options;
-  options.create_if_missing = true;
-
-  // Example code using rocksdb: Open database
-  rocksdb::Status status = rocksdb::DB::Open(options, "/tmp/rocksdb-for-bigtable", &db);
+  RocksDBStorage s = RocksDBStorage();
+  auto status = s.Open();
   if (!status.ok()) {
-      std::cerr << "Error opening RocksDB: " << status.ToString() << "\n";
-      return UnknownError("Failed to open RocksDB",
-                          GCP_ERROR_INFO()
-                              .WithMetadata("host", host)
-                              .WithMetadata("port", absl::StrCat("%d", port)));
+    return status;
   }
-
-
+  status = s.CreateNewTableEntry("TESTING");
+  if (!status.ok()) {
+    return status;
+  }
+  status = s.CreateNewTableEntry("TESTINGA1");
+  if (!status.ok()) {
+    return status;
+  }
+  status = s.CreateNewTableEntry("TESTINGB2");
+  if (!status.ok()) {
+    return status;
+  }
+  status = s.CreateNewTableEntry("TESTINGA0");
+  if (!status.ok()) {
+    return status;
+  }
+  s.ForEachTable([](auto name, auto meta){
+    std::cout<< "TABLE[" << name << "] schema.name = {" << meta.has_table() << " => " << meta.table().name() << "}\n";
+  }, "TESTINGA");
+  std::cout << "GetTable works? {" << s.GetTable("TESTING").value().table().name() << "}\n";
+  auto t = s.GetTable("TESTINGX");
+  if (!t.ok()) {
+    std::cout << "EEOERER\n" << t.status().message() << "\n";
+    return status;
+  }
+  std::cout << "OK\n";
 
   return std::unique_ptr<EmulatorServer>(default_emulator_server);
 }
