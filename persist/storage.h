@@ -29,7 +29,7 @@ class Storage {
         // Type of column family pointer
         using CFHandle = TCFPointer;
         // Column family type along with the pointer
-        using CFMeta = std::pair<google::bigtable::admin::v2::Type, CFHandle>
+        using CFMeta = std::pair<google::bigtable::admin::v2::Type, CFHandle>;
 
         Storage() {};
         virtual Status Close() = 0;
@@ -135,7 +135,21 @@ class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
             *schema = FakeSchema(table_name);
             storage::TableMeta meta;
             meta.set_allocated_table(schema);
-            return GetStatus(db->Put(woptions, metaHandle, rocksdb::Slice(table_name), rocksdb::Slice(SerializeTableMeta(meta))), "Put table key to metadata cf");
+            auto status = GetStatus(db->Put(woptions, metaHandle, rocksdb::Slice(table_name), rocksdb::Slice(SerializeTableMeta(meta))), "Put table key to metadata cf");
+            // Make sure column families exist
+            for(auto& cf : *meta.mutable_table()->mutable_column_families()) {
+                auto iter = column_families_handles_map.find(cf.first);
+                if (iter == column_families_handles_map.end()) {
+                    // Column family from table does not exist
+                    CFHandle handle;
+                    status = GetStatus(db->CreateColumnFamily(rocksdb::ColumnFamilyOptions(), cf.first, &handle), "Create table column family");
+                    if (!status.ok()) {
+                        return status;
+                    }
+                    column_families_handles_map[cf.first] = handle;
+                }
+            }
+            return Status();
         }
 
         // Get table
@@ -198,6 +212,26 @@ class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
             return std::make_pair(cf_iter->second.value_type(), column_families_handles_map[column_family]);
         }
 
+        Status PutRow(CFHandle column_family, std::string const& row_key, std::string const& column_qualifier, const storage::Row& row) {
+            return GetStatus(db->Put(woptions, column_family, rocksdb::Slice(RowKey(row_key, column_qualifier)), rocksdb::Slice(SerializeRow(row))), "Put row");
+        }
+
+        StatusOr<storage::Row> GetRow(CFHandle column_family, std::string const& row_key, std::string const& column_qualifier) {
+            std::string out;
+            auto status = GetStatus(
+                db->Get(roptions, column_family, rocksdb::Slice(RowKey(row_key, column_qualifier)), &out),
+                "Get row", 
+                NotFoundError("No such row.", GCP_ERROR_INFO().WithMetadata(
+                    "column_family", column_family->GetName()).WithMetadata("column_qualifier", column_qualifier).WithMetadata("row_key", row_key)));
+            if (!status.ok()) {
+                return status;
+            }
+            return DeserializeRow(std::move(out));
+        }
+
+    //     std::string const& row_key, std::string const& column_qualifier,
+    // std::chrono::milliseconds timestamp, std::string const& value) {
+
     private:
         storage::StorageRocksDBConfig storage_config;
 
@@ -207,6 +241,26 @@ class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
         rocksdb::DB* db;
         CFHandle metaHandle = nullptr;
         std::map<std::string, CFHandle> column_families_handles_map;
+
+        static inline std::string RowKey(std::string const& row_key, std::string const& column_qualifier) {
+            return row_key + "/" + column_qualifier;
+        }
+
+        inline StatusOr<storage::Row> DeserializeRow(std::string&& data) {
+            storage::Row row;
+            if (!row.ParseFromString(data)) {
+                return StorageError("DeserializeRow()");
+            }
+            return row;
+        }
+
+        inline std::string SerializeRow(storage::Row row) {
+            std::string out;
+            if (!row.SerializeToString(&out)) {
+                std::cout << "SERIALIZE FAILED!~~!!!!\n";
+            }
+            return out;
+        }
 
         inline StatusOr<storage::TableMeta> DeserializeTableMeta(std::string&& data) {
             storage::TableMeta meta;
