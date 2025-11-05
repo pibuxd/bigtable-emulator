@@ -20,19 +20,33 @@ Note that the cache directory grows indefinitely.
 Building the Bigtable emulator requires `bazel`.
 
 ```shell
-cd bigtable-emulator
-bazel build ...
+bazel build //...
 ```
+
 ## Running the Unit Tests
 
 ```shell
-bazel test ...
+bazel test //...
 ```
 
-### Running the Emulator
+## Running clang-tidy with Bazel
+
+```shell
+bazel build --config clang-tidy //...
+```
+
+## Running the Emulator
 
 ```shell
 bigtable-emulator -p <port>
+```
+
+## Development
+
+### Formatting the code
+```bash
+# On bash you neet to enable globstar with `shopt -s globstar` first
+clang-format -i -style=file -assume-filename=.clang-format **/*.cc **/*.h
 ```
 
 ## Contributing changes
