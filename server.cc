@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "persist/example.h"
+
 #include "server.h"
 #include "cluster.h"
 #include "row_streamer.h"
@@ -336,9 +338,9 @@ class EmulatorTableService final : public btadmin::BigtableTableAdmin::Service {
 
 class DefaultEmulatorServer : public EmulatorServer {
  public:
-  DefaultEmulatorServer(std::string const& host, std::uint16_t port)
+  DefaultEmulatorServer(std::string const& host, std::uint16_t port, RocksDBStorage const& storage)
       : bound_port_(port),
-        cluster_(std::make_shared<Cluster>()),
+        cluster_(std::make_shared<Cluster>(storage)),
         bt_service_(cluster_),
         table_service_(cluster_) {
     builder_.AddListeningPort(host + ":" + std::to_string(port),
@@ -353,7 +355,7 @@ class DefaultEmulatorServer : public EmulatorServer {
   void Wait() override { server_->Wait(); }
   bool HasValidServer() { return static_cast<bool>(server_); }
 
- private:
+ public: // FIXME: Changed to public for testing
   int bound_port_;
   std::shared_ptr<Cluster> cluster_;
   EmulatorService bt_service_;
@@ -364,7 +366,14 @@ class DefaultEmulatorServer : public EmulatorServer {
 
 StatusOr<std::unique_ptr<EmulatorServer>> CreateDefaultEmulatorServer(
     std::string const& host, std::uint16_t port) {
-  auto* default_emulator_server = new DefaultEmulatorServer(host, port);
+    
+  RocksDBStorage s = RocksDBStorage();
+  auto status = s.Open();
+  if (!status.ok()) {
+    return status;
+  }
+
+  auto* default_emulator_server = new DefaultEmulatorServer(host, port, s);
   if (!default_emulator_server->HasValidServer()) {
     return UnknownError("An unknown error occurred when starting server",
                         GCP_ERROR_INFO()
@@ -372,37 +381,39 @@ StatusOr<std::unique_ptr<EmulatorServer>> CreateDefaultEmulatorServer(
                             .WithMetadata("port", absl::StrCat("%d", port)));
   }
 
-  RocksDBStorage s = RocksDBStorage();
-  auto status = s.Open();
-  if (!status.ok()) {
-    return status;
-  }
-  status = s.CreateNewTableEntry("TESTING");
-  if (!status.ok()) {
-    return status;
-  }
-  status = s.CreateNewTableEntry("TESTINGA1");
-  if (!status.ok()) {
-    return status;
-  }
-  status = s.CreateNewTableEntry("TESTINGB2");
-  if (!status.ok()) {
-    return status;
-  }
-  status = s.CreateNewTableEntry("TESTINGA0");
-  if (!status.ok()) {
-    return status;
-  }
-  s.ForEachTable([](auto name, auto meta){
-    std::cout<< "TABLE[" << name << "] schema.name = {" << meta.has_table() << " => " << meta.table().name() << "}\n";
-  }, "TESTINGA");
-  std::cout << "GetTable works? {" << s.GetTable("TESTING").value().table().name() << "}\n";
-  auto t = s.GetTable("TESTINGX");
-  if (!t.ok()) {
-    std::cout << "EEOERER\n" << t.status().message() << "\n";
-    return status;
-  }
-  std::cout << "OK\n";
+  // RocksDBStorage s = RocksDBStorage();
+  // auto status = s.Open();
+  // if (!status.ok()) {
+  //   return status;
+  // }
+  // status = s.CreateNewTableEntry("TESTING");
+  // if (!status.ok()) {
+  //   return status;
+  // }
+  // status = s.CreateNewTableEntry("TESTINGA1");
+  // if (!status.ok()) {
+  //   return status;
+  // }
+  // status = s.CreateNewTableEntry("TESTINGB2");
+  // if (!status.ok()) {
+  //   return status;
+  // }
+  // status = s.CreateNewTableEntry("TESTINGA0");
+  // if (!status.ok()) {
+  //   return status;
+  // }
+  // s.ForEachTable([](auto name, auto meta){
+  //   std::cout<< "TABLE[" << name << "] schema.name = {" << meta.has_table() << " => " << meta.table().name() << "}\n";
+  // }, "TESTINGA");
+  // std::cout << "GetTable works? {" << s.GetTable("TESTING").value().table().name() << "}\n";
+  // auto t = s.GetTable("TESTINGX");
+  // if (!t.ok()) {
+  //   std::cout << "EEOERER\n" << t.status().message() << "\n";
+  //   return status;
+  // }
+  // std::cout << "OK\n";
+
+  ExampleClusterCode(default_emulator_server->cluster_);
 
   return std::unique_ptr<EmulatorServer>(default_emulator_server);
 }

@@ -15,6 +15,7 @@
 #ifndef GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_CLUSTER_H
 #define GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_CLUSTER_H
 
+#include "persist/storage.h"
 #include "table.h"
 #include "google/cloud/status.h"
 #include "google/cloud/status_or.h"
@@ -38,6 +39,9 @@ namespace emulator {
  */
 class Cluster {
  public:
+
+   explicit Cluster(RocksDBStorage const& storage): storage_(storage) {}
+
   /**
    * Create a new table according to schema.
    *
@@ -105,6 +109,8 @@ class Cluster {
   StatusOr<std::shared_ptr<Table>> FindTable(std::string const& table_name);
 
  private:
+  RocksDBStorage storage_;
+
   mutable std::mutex mu_;
 
   /**
@@ -115,7 +121,7 @@ class Cluster {
    * concurrency - every access to a table should start with creating a copy of
    * the shared pointer.
    */
-  std::map<std::string, std::shared_ptr<Table>> table_by_name_;
+   std::map<std::string, std::shared_ptr<Table>> table_by_name_;
 };
 
 }  // namespace emulator

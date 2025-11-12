@@ -1,3 +1,5 @@
+#ifndef GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_STORAGE_H
+#define GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_STORAGE_H
 
 #include <vector>
 #include <chrono>
@@ -5,10 +7,13 @@
 #include "rocksdb/db.h"
 #include "rocksdb/options.h"
 #include "rocksdb/slice.h"
+#include "rocksdb/utilities/transaction.h"
+#include "rocksdb/utilities/transaction_db.h"
 #include "persist/proto/storage.pb.h"
 #include "absl/strings/str_cat.h"
 #include "google/cloud/status.h"
 #include "google/cloud/status_or.h"
+#include "google/cloud/internal/make_status.h"
 #include <google/bigtable/admin/v2/table.pb.h>
 
 namespace google {
@@ -16,7 +21,7 @@ namespace cloud {
 namespace bigtable {
 namespace emulator {
 
-google::bigtable::admin::v2::Table FakeSchema(std::string const& table_name) {
+static inline google::bigtable::admin::v2::Table FakeSchema(std::string const& table_name) {
   google::bigtable::admin::v2::Table schema;
   schema.set_name(table_name);
   return schema;
@@ -37,16 +42,22 @@ class Storage {
         virtual Status Open() = 0;
 
         // Create table
-        virtual Status CreateNewTableEntry(std::string table_name) = 0;
+        virtual Status CreateTable(google::bigtable::admin::v2::Table& schema) = 0;
+
+        // Delete table
+        virtual Status DeleteTable(std::string table_name, std::function<Status(std::string, storage::TableMeta)>&& precondition_fn) const = 0;
 
         // Get table
-        virtual StatusOr<storage::TableMeta> GetTable(std::string table_name) = 0;
+        virtual StatusOr<storage::TableMeta> GetTable(std::string table_name) const = 0;
+
+        // Has table
+        virtual bool HasTable(std::string table_name) const = 0;
 
         // Iterate tables
-        virtual Status ForEachTable(std::function<void(std::string, storage::TableMeta)>&& fn) = 0;
+        virtual Status ForEachTable(std::function<Status(std::string, storage::TableMeta)>&& fn) const = 0;
 
         // Iterate tables with prefix
-        virtual Status ForEachTable(std::function<void(std::string, storage::TableMeta)>&& fn, std::string&& prefix) = 0;
+        virtual Status ForEachTable(std::function<Status(std::string, storage::TableMeta)>&& fn, const std::string& prefix) const = 0;
 
         // Get column family type and handle
         virtual StatusOr<CFMeta> GetColumnFamily(std::string table_name, std::string column_family) = 0;
@@ -59,7 +70,7 @@ class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
 
         RocksDBStorage() {
             storage_config = storage::StorageRocksDBConfig();
-            storage_config.set_db_path("/tmp/rocksdb-for-bigtable-test2");
+            storage_config.set_db_path("/tmp/rocksdb-for-bigtable-test4");
             storage_config.set_meta_column_family("bte_metadata");
         }
 
@@ -77,6 +88,7 @@ class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
         // Initialize storage
         virtual Status Open() {
             options = rocksdb::Options();
+            txn_options = rocksdb::TransactionDBOptions();
             woptions = rocksdb::WriteOptions();
             roptions = rocksdb::ReadOptions();
 
@@ -87,7 +99,7 @@ class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
             std::vector<std::string> column_families_names;
             std::vector<rocksdb::ColumnFamilyDescriptor> column_families;
             std::vector<CFHandle> handles;
-            auto status = GetStatus(rocksdb::DB::ListColumnFamilies(options, storage_config.db_path(), &column_families_names), "List column families");
+            auto status = GetStatus(rocksdb::TransactionDB::ListColumnFamilies(options, storage_config.db_path(), &column_families_names), "List column families");
             if (!status.ok()) {
                 // We can ignore error and warn here
                 //return status;
@@ -106,6 +118,7 @@ class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
             // Create missing collumn family
             if (std::find(column_families_names.begin(), column_families_names.end(), storage_config.meta_column_family()) == column_families_names.end()) {
                 CFHandle cf;
+                std::cout.flush();
                 status = GetStatus(db->CreateColumnFamily(rocksdb::ColumnFamilyOptions(), storage_config.meta_column_family(), &cf), "Create meta column family");
                 if (!status.ok()) {
                     return status;
@@ -129,12 +142,23 @@ class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
         }
 
         // Create table
-        virtual Status CreateNewTableEntry(std::string table_name) {
-            google::bigtable::admin::v2::Table* schema = new google::bigtable::admin::v2::Table();
-            *schema = FakeSchema(table_name);
+        virtual Status CreateTable(google::bigtable::admin::v2::Table& schema) {
+            rocksdb::Transaction* txn = db->BeginTransaction(woptions);
+            google::bigtable::admin::v2::Table* xschema = new google::bigtable::admin::v2::Table();
+            *xschema = schema;
+
+            auto key = rocksdb::Slice(schema.name());
+            if(KeyExists(txn, metaHandle, key)) {
+                // Table exists
+                return AlreadyExistsError("Table already exists.", GCP_ERROR_INFO().WithMetadata(
+                    "table_name", schema.name()));
+            }
+
             storage::TableMeta meta;
-            meta.set_allocated_table(schema);
-            auto status = GetStatus(db->Put(woptions, metaHandle, rocksdb::Slice(table_name), rocksdb::Slice(SerializeTableMeta(meta))), "Put table key to metadata cf");
+            //meta.set_allocated_table(xschema);
+            meta.set_allocated_table(&schema);
+            auto status = GetStatus(db->Put(woptions, metaHandle, key, rocksdb::Slice(SerializeTableMeta(meta))), "Put table key to metadata cf");
+            meta.release_table();
             // Make sure column families exist
             for(auto& cf : *meta.mutable_table()->mutable_column_families()) {
                 auto iter = column_families_handles_map.find(cf.first);
@@ -148,11 +172,54 @@ class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
                     column_families_handles_map[cf.first] = handle;
                 }
             }
-            return Status();
+
+            return Commit(txn);
+        }
+
+        // Delete table
+        virtual Status DeleteTable(std::string table_name, std::function<Status(std::string, storage::TableMeta)>&& precondition_fn) const {
+
+            // schema_.deletion_protection();
+            rocksdb::Transaction* txn = db->BeginTransaction(woptions);
+            
+            std::string out;
+            auto status = GetStatus(
+                txn->Get(roptions, metaHandle, rocksdb::Slice(table_name), &out),
+                "Get table",
+                NotFoundError("No such table.", GCP_ERROR_INFO().WithMetadata(
+                    "table_name", table_name)));
+            if (!status.ok()) {
+                return Rollback(status, txn);
+            }
+            const auto meta = DeserializeTableMeta(std::move(out));
+            if (!meta.ok()) {
+                return Rollback(meta.status(), txn);
+            }
+            const auto precondition_status = precondition_fn(table_name, meta.value());
+            if (!precondition_status.ok()) {
+                return Rollback(precondition_status, txn);
+            }
+
+            const auto delete_status = GetStatus(
+                txn->Delete(metaHandle, rocksdb::Slice(table_name)),
+                "Delete table",
+                NotFoundError("No such table.", GCP_ERROR_INFO().WithMetadata(
+                    "table_name", table_name)));
+
+            if (!delete_status.ok()) {
+                return Rollback(delete_status, txn);
+            }
+            return Commit(txn);
+        }
+
+        // Has table
+        virtual bool HasTable(std::string table_name) const {
+            std::string _;
+            return db->KeyMayExist(roptions, metaHandle, rocksdb::Slice(table_name), &_) && db->Get(roptions, metaHandle, rocksdb::Slice(table_name), &_).ok();
         }
 
         // Get table
-        virtual StatusOr<storage::TableMeta> GetTable(std::string table_name) {
+        virtual StatusOr<storage::TableMeta> GetTable(std::string table_name) const {
             std::string out;
             auto status = GetStatus(
                 db->Get(roptions, metaHandle, rocksdb::Slice(table_name), &out),
@@ -166,14 +233,18 @@ class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
         }
 
         // Iterate tables
-        virtual Status ForEachTable(std::function<void(std::string, storage::TableMeta)>&& fn) {
+        virtual Status ForEachTable(std::function<Status(std::string, storage::TableMeta)>&& fn) const {
             rocksdb::Iterator* iter = db->NewIterator(roptions, metaHandle);
             for (iter->SeekToFirst(); iter->Valid(); iter->Next()) {
                 auto meta = DeserializeTableMeta(iter->value().ToString());
                 if (!meta.ok()) {
                     return meta.status();
                 }
-                fn(iter->key().ToString(), meta.value());
+                const auto fn_status = fn(iter->key().ToString(), meta.value());
+                if(!fn_status.ok()) {
+                    delete iter;
+                    return fn_status;
+                }
             }
             assert(iter->status().ok());
             delete iter;
@@ -181,7 +252,7 @@ class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
         }
 
         // Iterate tables with prefix
-        virtual Status ForEachTable(std::function<void(std::string, storage::TableMeta)>&& fn, std::string&& prefix) {
+        virtual Status ForEachTable(std::function<Status(std::string, storage::TableMeta)>&& fn, const std::string& prefix) const {
             rocksdb::Iterator* iter = db->NewIterator(roptions, metaHandle);
             std::cout << "SEEK SLICE=" << prefix << "\n";
             for (iter->Seek(rocksdb::Slice(prefix)); iter->Valid() && iter->key().starts_with(prefix); iter->Next()) {
@@ -189,7 +260,11 @@ class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
                 if (!meta.ok()) {
                     return meta.status();
                 }
-                fn(iter->key().ToString(), meta.value());
+                const auto fn_status = fn(iter->key().ToString(), meta.value());
+                if(!fn_status.ok()) {
+                    delete iter;
+                    return fn_status;
+                }
             }
             assert(iter->status().ok());
             delete iter;
@@ -241,9 +316,10 @@ class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
         storage::StorageRocksDBConfig storage_config;
 
         rocksdb::Options options;
+        rocksdb::TransactionDBOptions txn_options;
         rocksdb::WriteOptions woptions;
         rocksdb::ReadOptions roptions;
-        rocksdb::DB* db;
+        rocksdb::TransactionDB* db;
         CFHandle metaHandle = nullptr;
         std::map<std::string, CFHandle> column_families_handles_map;
 
@@ -251,7 +327,7 @@ class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
             return absl::StrCat(row_key, "/", column_qualifier);
         }
 
-        inline StatusOr<storage::Row> DeserializeRow(std::string&& data) {
+        inline StatusOr<storage::Row> DeserializeRow(std::string&& data) const {
             storage::Row row;
             if (!row.ParseFromString(data)) {
                 return StorageError("DeserializeRow()");
@@ -259,7 +335,7 @@ class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
             return row;
         }
 
-        inline std::string SerializeRow(storage::Row row) {
+        inline std::string SerializeRow(storage::Row row) const {
             std::string out;
             if (!row.SerializeToString(&out)) {
                 std::cout << "SERIALIZE FAILED!~~!!!!\n";
@@ -267,7 +343,7 @@ class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
             return out;
         }
 
-        inline StatusOr<storage::TableMeta> DeserializeTableMeta(std::string&& data) {
+        inline StatusOr<storage::TableMeta> DeserializeTableMeta(std::string&& data) const {
             storage::TableMeta meta;
             if (!meta.ParseFromString(data)) {
                 return StorageError("DeserializeTableMeta()");
@@ -276,12 +352,41 @@ class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
             return meta;
         }
 
-        inline std::string SerializeTableMeta(storage::TableMeta meta) {
+        inline std::string SerializeTableMeta(storage::TableMeta meta) const {
             std::string out;
             if (!meta.SerializeToString(&out)) {
                 std::cout << "SERIALIZE FAILED!~~!!!!\n";
             }
+            std::cout << "SAVED => " << meta.mutable_table()->name() << "\n";
             return out;
+        }
+
+        inline Status Rollback(
+            Status status,
+            rocksdb::Transaction* txn
+        ) const {
+            std::cout << "ROLLBACK\n";
+            const auto txn_status = txn->Rollback();
+            assert(txn_status.ok());
+            delete txn;
+            if (!status.ok()) {
+                return status;
+            }
+            return Status();
+            //delete txn;
+            //return GetStatus(status, "Transaction commit");
+        }
+
+        inline Status Commit(
+            rocksdb::Transaction* txn
+        ) const {
+            std::cout << "COMMIT!\n";
+            const auto status = txn->Commit();
+            assert(status.ok());
+            delete txn;
+            return Status();
+            //delete txn;
+            //return GetStatus(status, "Transaction commit");
         }
 
         inline Status OpenDBWithRetry(
@@ -291,7 +396,7 @@ class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
         ) {
             auto status = rocksdb::Status();
             for(auto i = 0; i<5; ++i) {
-                status = rocksdb::DB::Open(options, storage_config.db_path(), column_families, handles, &db);
+                status = rocksdb::TransactionDB::Open(options, txn_options, storage_config.db_path(), column_families, handles, &db);
                 if (status.IsIOError()) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(250));
                     continue;
@@ -302,13 +407,13 @@ class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
             return GetStatus(status, "Open database");
         }
 
-        inline Status StorageError(std::string&& operation) {
+        inline Status StorageError(std::string&& operation) const {
             return InternalError("Storage error",
                         GCP_ERROR_INFO().WithMetadata(
                             "operation", operation));
         }
 
-        inline Status GetStatus(rocksdb::Status status, std::string&& operation, Status&& not_found_status) {
+        inline Status GetStatus(rocksdb::Status status, std::string&& operation, Status&& not_found_status) const {
             if (status.IsNotFound()) {
                 return not_found_status;
             }
@@ -318,12 +423,18 @@ class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
             return Status();
         }
 
-        inline Status GetStatus(rocksdb::Status status, std::string&& operation) {
+        inline Status GetStatus(rocksdb::Status status, std::string&& operation) const {
             if (!status.ok()) {
                 std::cout << "ERR: " << status.ToString() << "\n";
                 return StorageError(std::move(operation));
             }
             return Status();
+        }
+
+        inline bool KeyExists(rocksdb::Transaction* txn, rocksdb::ColumnFamilyHandle* column_family, const rocksdb::Slice& key) const {
+            std::string _;
+            return //txn->KeyMayExist(roptions, column_family, key, &_) &&
+                txn->Get(roptions, column_family, key, &_).ok();
         }
 };
 
@@ -332,3 +443,5 @@ class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
 }  // namespace bigtable
 }  // namespace cloud
 }  // namespace google
+
+#endif  // GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_STORAGE_H
