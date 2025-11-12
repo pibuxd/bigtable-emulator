@@ -5,9 +5,8 @@
 #include "rocksdb/db.h"
 #include "rocksdb/options.h"
 #include "rocksdb/slice.h"
-
 #include "persist/proto/storage.pb.h"
-
+#include "absl/strings/str_cat.h"
 #include "google/cloud/status.h"
 #include "google/cloud/status_or.h"
 #include <google/bigtable/admin/v2/table.pb.h>
@@ -212,6 +211,10 @@ class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
             return std::make_pair(cf_iter->second.value_type(), column_families_handles_map[column_family]);
         }
 
+        Status DeleteRow(CFHandle column_family, std::string const& row_key, std::string const& column_qualifier) {
+            return GetStatus(db->Delete(woptions, column_family, rocksdb::Slice(RowKey(row_key, column_qualifier))), "Delete row");
+        }
+
         Status PutRow(CFHandle column_family, std::string const& row_key, std::string const& column_qualifier, const storage::Row& row) {
             return GetStatus(db->Put(woptions, column_family, rocksdb::Slice(RowKey(row_key, column_qualifier)), rocksdb::Slice(SerializeRow(row))), "Put row");
         }
@@ -229,6 +232,8 @@ class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
             return DeserializeRow(std::move(out));
         }
 
+
+
     //     std::string const& row_key, std::string const& column_qualifier,
     // std::chrono::milliseconds timestamp, std::string const& value) {
 
@@ -243,7 +248,7 @@ class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
         std::map<std::string, CFHandle> column_families_handles_map;
 
         static inline std::string RowKey(std::string const& row_key, std::string const& column_qualifier) {
-            return row_key + "/" + column_qualifier;
+            return absl::StrCat(row_key, "/", column_qualifier);
         }
 
         inline StatusOr<storage::Row> DeserializeRow(std::string&& data) {
