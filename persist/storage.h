@@ -27,16 +27,54 @@ static inline google::bigtable::admin::v2::Table FakeSchema(std::string const& t
   return schema;
 }
 
-template<typename TCFPointer>
+
+class StorageTX {
+    public:
+        virtual ~StorageTX() = default;
+        virtual Status Commit() = 0;
+        virtual Status Rollback(Status s) = 0;
+        
+        virtual Status SetCell(
+            ::google::bigtable::v2::Mutation_SetCell const& set_cell,
+            absl::optional<std::chrono::milliseconds> timestamp_override = absl::nullopt
+        ) = 0;
+
+        virtual Status AddToCell(
+            ::google::bigtable::v2::Mutation_AddToCell const& add_to_cell,
+            absl::optional<std::chrono::milliseconds> timestamp_override
+        ) = 0;
+        
+        virtual Status MergeToCell(
+            ::google::bigtable::v2::Mutation_MergeToCell const& merge_to_cell
+        ) = 0;
+        
+        virtual Status DeleteFromColumn(
+            ::google::bigtable::v2::Mutation_DeleteFromColumn const& delete_from_column
+        ) = 0;
+        
+        virtual Status DeleteFromFamily(
+            ::google::bigtable::v2::Mutation_DeleteFromFamily const& delete_from_family
+        ) = 0;
+
+        virtual Status DeleteFromRow() = 0;
+
+        virtual StatusOr<::google::bigtable::v2::ReadModifyWriteRowResponse> ReadModifyWriteRow(
+            google::bigtable::v2::ReadModifyWriteRowRequest const& request
+        ) = 0;
+};
+
 class Storage {
     public:
         // Type of column family pointer
-        using CFHandle = TCFPointer;
+        //using CFHandle = TCFPointer;
         // Column family type along with the pointer
-        using CFMeta = std::pair<google::bigtable::admin::v2::Type, CFHandle>;
+        //using CFMeta = std::pair<google::bigtable::admin::v2::Type, CFHandle>;
 
         Storage() {};
         virtual Status Close() = 0;
+
+        // Start transaction
+        virtual std::unique_ptr<StorageTX> StartTransaction() = 0;
 
         // Initialize storage
         virtual Status Open() = 0;
@@ -60,18 +98,98 @@ class Storage {
         virtual Status ForEachTable(std::function<Status(std::string, storage::TableMeta)>&& fn, const std::string& prefix) const = 0;
 
         // Get column family type and handle
-        virtual StatusOr<CFMeta> GetColumnFamily(std::string table_name, std::string column_family) = 0;
+        //virtual StatusOr<CFMeta> GetColumnFamily(std::string table_name, std::string column_family) = 0;
 };
 
-class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
+
+class RocksDBStorageTX : public StorageTX {
     public:
-        using CFHandle = typename Storage<rocksdb::ColumnFamilyHandle*>::CFHandle;
-        using CFMeta = typename Storage<rocksdb::ColumnFamilyHandle*>::CFMeta;
+        friend class RocksDBStorage;
+        virtual Status Commit() {
+            std::cout << "TX COMMIT!\n";
+            const auto status = txn_->Commit();
+            assert(status.ok());
+            delete txn_;
+            txn_ = nullptr;
+            return Status();
+        }
+
+        virtual Status Rollback(
+            Status status
+        ) {
+            std::cout << "TX ROLLBACK\n";
+            const auto txn_status = txn_->Rollback();
+            assert(txn_status.ok());
+            delete txn_;
+            txn_ = nullptr;
+            if (!status.ok()) {
+                return status;
+            }
+            return Status();
+            //delete txn;
+            //return GetStatus(status, "Transaction commit");
+        }
+        //RocksDBStorageTX(rocksdb::Transaction* txn): txn_(txn) {}
+
+        virtual Status SetCell(
+            ::google::bigtable::v2::Mutation_SetCell const& set_cell,
+            absl::optional<std::chrono::milliseconds> timestamp_override = absl::nullopt
+        ) = 0;
+
+        virtual Status AddToCell(
+            ::google::bigtable::v2::Mutation_AddToCell const& add_to_cell,
+            absl::optional<std::chrono::milliseconds> timestamp_override
+        ) = 0;
+        
+        virtual Status MergeToCell(
+            ::google::bigtable::v2::Mutation_MergeToCell const& merge_to_cell
+        ) = 0;
+        
+        virtual Status DeleteFromColumn(
+            ::google::bigtable::v2::Mutation_DeleteFromColumn const& delete_from_column
+        ) = 0;
+        
+        virtual Status DeleteFromFamily(
+            ::google::bigtable::v2::Mutation_DeleteFromFamily const& delete_from_family
+        ) = 0;
+
+        virtual Status DeleteFromRow() = 0;
+
+        virtual StatusOr<::google::bigtable::v2::ReadModifyWriteRowResponse> ReadModifyWriteRow(
+            google::bigtable::v2::ReadModifyWriteRowRequest const& request
+        ) = 0;
+
+        virtual ~RocksDBStorageTX() {
+            if (txn_ != nullptr) {
+                delete txn_;
+                txn_ = nullptr;
+            }
+        }
+    private:
+        rocksdb::Transaction* txn_;
+        rocksdb::ReadOptions roptions_;
+        explicit RocksDBStorageTX(rocksdb::Transaction* txn): txn_(txn), roptions_() {}
+
+        inline bool KeyExists(rocksdb::ColumnFamilyHandle* column_family, const rocksdb::Slice& key) const {
+            std::string _;
+            return //txn->KeyMayExist(roptions, column_family, key, &_) &&
+                txn_->Get(roptions_, column_family, key, &_).ok();
+        }
+};
+
+class RocksDBStorage : public Storage {
+    public:
+        using CFHandle = rocksdb::ColumnFamilyHandle*;
+        //using CFMeta = typename Storage<rocksdb::ColumnFamilyHandle*>::CFMeta;
 
         RocksDBStorage() {
             storage_config = storage::StorageRocksDBConfig();
             storage_config.set_db_path("/tmp/rocksdb-for-bigtable-test4");
             storage_config.set_meta_column_family("bte_metadata");
+        }
+
+        virtual std::unique_ptr<StorageTX> StartTransaction() {
+            return StartRocksTransaction();
         }
 
         virtual Status Close() {
@@ -143,12 +261,13 @@ class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
 
         // Create table
         virtual Status CreateTable(google::bigtable::admin::v2::Table& schema) {
-            rocksdb::Transaction* txn = db->BeginTransaction(woptions);
+            //rocksdb::Transaction* txn = db->BeginTransaction(woptions);
+            auto txn = StartRocksTransaction();
             google::bigtable::admin::v2::Table* xschema = new google::bigtable::admin::v2::Table();
             *xschema = schema;
 
             auto key = rocksdb::Slice(schema.name());
-            if(KeyExists(txn, metaHandle, key)) {
+            if(txn->KeyExists(metaHandle, key)) {
                 // Table exists
                 return AlreadyExistsError("Table already exists.", GCP_ERROR_INFO().WithMetadata(
                     "table_name", schema.name()));
@@ -157,7 +276,7 @@ class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
             storage::TableMeta meta;
             //meta.set_allocated_table(xschema);
             meta.set_allocated_table(&schema);
-            auto status = GetStatus(db->Put(woptions, metaHandle, key, rocksdb::Slice(SerializeTableMeta(meta))), "Put table key to metadata cf");
+            auto status = GetStatus(txn->txn_->Put(metaHandle, key, rocksdb::Slice(SerializeTableMeta(meta))), "Put table key to metadata cf");
             meta.release_table();
             // Make sure column families exist
             for(auto& cf : *meta.mutable_table()->mutable_column_families()) {
@@ -172,44 +291,46 @@ class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
                     column_families_handles_map[cf.first] = handle;
                 }
             }
-
-            return Commit(txn);
+            return txn->Commit();
+            //return Commit(txn);
         }
 
         // Delete table
         virtual Status DeleteTable(std::string table_name, std::function<Status(std::string, storage::TableMeta)>&& precondition_fn) const {
 
             // schema_.deletion_protection();
-            rocksdb::Transaction* txn = db->BeginTransaction(woptions);
+            //rocksdb::Transaction* txn = db->BeginTransaction(woptions);
+            auto txn = StartRocksTransaction();
             
             std::string out;
             auto status = GetStatus(
-                txn->Get(roptions, metaHandle, rocksdb::Slice(table_name), &out),
+                txn->txn_->Get(roptions, metaHandle, rocksdb::Slice(table_name), &out),
                 "Get table",
                 NotFoundError("No such table.", GCP_ERROR_INFO().WithMetadata(
                     "table_name", table_name)));
             if (!status.ok()) {
-                return Rollback(status, txn);
+                // ?
+                return txn->Rollback(status);
             }
             const auto meta = DeserializeTableMeta(std::move(out));
             if (!meta.ok()) {
-                return Rollback(meta.status(), txn);
+                return txn->Rollback(meta.status());
             }
             const auto precondition_status = precondition_fn(table_name, meta.value());
             if (!precondition_status.ok()) {
-                return Rollback(precondition_status, txn);
+                return txn->Rollback(precondition_status);
             }
 
             const auto delete_status = GetStatus(
-                txn->Delete(metaHandle, rocksdb::Slice(table_name)),
+                txn->txn_->Delete(metaHandle, rocksdb::Slice(table_name)),
                 "Delete table",
                 NotFoundError("No such table.", GCP_ERROR_INFO().WithMetadata(
                     "table_name", table_name)));
 
             if (!delete_status.ok()) {
-                return Rollback(delete_status, txn);
+                return txn->Rollback(delete_status);
             }
-            return Commit(txn);
+            return txn->Commit();
         }
 
         // Has table
@@ -272,19 +393,19 @@ class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
         }
 
         // Get column family type and handle
-        virtual StatusOr<CFMeta> GetColumnFamily(std::string table_name, std::string column_family) {
-            auto meta = GetTable(table_name);
-            if (!meta.ok()) {
-                return meta.status();
-            }
-            auto cfs = meta.value().mutable_table()->mutable_column_families();
-            auto cf_iter = cfs->find(column_family);
-            if (cf_iter == cfs->end()) {
-                return NotFoundError("No such column family.", GCP_ERROR_INFO().WithMetadata(
-                    "table_name", table_name).WithMetadata("column_family", column_family));
-            }
-            return std::make_pair(cf_iter->second.value_type(), column_families_handles_map[column_family]);
-        }
+        // StatusOr<CFMeta> __GetColumnFamily(std::string table_name, std::string column_family) {
+        //     auto meta = GetTable(table_name);
+        //     if (!meta.ok()) {
+        //         return meta.status();
+        //     }
+        //     auto cfs = meta.value().mutable_table()->mutable_column_families();
+        //     auto cf_iter = cfs->find(column_family);
+        //     if (cf_iter == cfs->end()) {
+        //         return NotFoundError("No such column family.", GCP_ERROR_INFO().WithMetadata(
+        //             "table_name", table_name).WithMetadata("column_family", column_family));
+        //     }
+        //     return std::make_pair(cf_iter->second.value_type(), column_families_handles_map[column_family]);
+        // }
 
         Status DeleteRow(CFHandle column_family, std::string const& row_key, std::string const& column_qualifier) {
             return GetStatus(db->Delete(woptions, column_family, rocksdb::Slice(RowKey(row_key, column_qualifier))), "Delete row");
@@ -327,6 +448,12 @@ class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
             return absl::StrCat(row_key, "/", column_qualifier);
         }
 
+        inline std::unique_ptr<RocksDBStorageTX> StartRocksTransaction() const {
+            rocksdb::Transaction* txn = db->BeginTransaction(woptions);
+            //return std::make_unique<RocksDBStorageTX>(txn);
+            return std::unique_ptr<RocksDBStorageTX>(new RocksDBStorageTX(txn));
+        }
+
         inline StatusOr<storage::Row> DeserializeRow(std::string&& data) const {
             storage::Row row;
             if (!row.ParseFromString(data)) {
@@ -361,33 +488,33 @@ class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
             return out;
         }
 
-        inline Status Rollback(
-            Status status,
-            rocksdb::Transaction* txn
-        ) const {
-            std::cout << "ROLLBACK\n";
-            const auto txn_status = txn->Rollback();
-            assert(txn_status.ok());
-            delete txn;
-            if (!status.ok()) {
-                return status;
-            }
-            return Status();
-            //delete txn;
-            //return GetStatus(status, "Transaction commit");
-        }
+        // inline Status Rollback(
+        //     Status status,
+        //     rocksdb::Transaction* txn
+        // ) const {
+        //     std::cout << "ROLLBACK\n";
+        //     const auto txn_status = txn->Rollback();
+        //     assert(txn_status.ok());
+        //     delete txn;
+        //     if (!status.ok()) {
+        //         return status;
+        //     }
+        //     return Status();
+        //     //delete txn;
+        //     //return GetStatus(status, "Transaction commit");
+        // }
 
-        inline Status Commit(
-            rocksdb::Transaction* txn
-        ) const {
-            std::cout << "COMMIT!\n";
-            const auto status = txn->Commit();
-            assert(status.ok());
-            delete txn;
-            return Status();
-            //delete txn;
-            //return GetStatus(status, "Transaction commit");
-        }
+        // inline Status Commit(
+        //     rocksdb::Transaction* txn
+        // ) const {
+        //     std::cout << "COMMIT!\n";
+        //     const auto status = txn->Commit();
+        //     assert(status.ok());
+        //     delete txn;
+        //     return Status();
+        //     //delete txn;
+        //     //return GetStatus(status, "Transaction commit");
+        // }
 
         inline Status OpenDBWithRetry(
             rocksdb::Options options,
@@ -431,11 +558,11 @@ class RocksDBStorage : Storage<rocksdb::ColumnFamilyHandle*> {
             return Status();
         }
 
-        inline bool KeyExists(rocksdb::Transaction* txn, rocksdb::ColumnFamilyHandle* column_family, const rocksdb::Slice& key) const {
-            std::string _;
-            return //txn->KeyMayExist(roptions, column_family, key, &_) &&
-                txn->Get(roptions, column_family, key, &_).ok();
-        }
+        // inline bool KeyExists(rocksdb::Transaction* txn, rocksdb::ColumnFamilyHandle* column_family, const rocksdb::Slice& key) const {
+        //     std::string _;
+        //     return //txn->KeyMayExist(roptions, column_family, key, &_) &&
+        //         txn->Get(roptions, column_family, key, &_).ok();
+        // }
 };
 
 
