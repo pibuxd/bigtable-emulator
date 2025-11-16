@@ -4,6 +4,9 @@
 #include <vector>
 #include <chrono>
 #include <thread>
+#include "cell_view.h"
+#include "filter.h"
+#include "filtered_map.h"
 #include "rocksdb/db.h"
 #include "rocksdb/options.h"
 #include "rocksdb/slice.h"
@@ -27,7 +30,6 @@ static inline google::bigtable::admin::v2::Table FakeSchema(std::string const& t
   schema.set_name(table_name);
   return schema;
 }
-
 
 class StorageRowTX {
     public:
@@ -119,6 +121,26 @@ class Storage {
         //virtual StatusOr<CFMeta> GetColumnFamily(std::string table_name, std::string column_family) = 0;
 };
 
+// class RocksDBCellIterator {
+//     typedef typename std::iterator_traits<InIt>::value_type      value_type;
+//     typedef typename std::iterator_traits<InIt>::difference_type difference_type;
+//     typedef typename std::iterator_traits<InIt>::reference       reference;
+//     typedef typename std::iterator_traits<InIt>::pointer         pointer;
+//     my_iterator(InIt it, InIt end, Pred pred): it_(it), end_(end), pred_(pred) {}
+//     bool operator== (my_iterator const& other) const { reutrn this->it_ == other.it_; }
+//     bool operator!= (my_iterator const& other) const { return !(*this == other); }
+//     reference operator*() { return *this->it_; }
+//     pointer   operator->() { return this->it_; }
+//     my_iterator& operator++() {
+//         this->it_ = std::find_if(this->it_, this->end_, this->pred_);
+//         return *this;
+//     }
+//     my_iterator operator++(int)
+//     { my_iterator rc(*this); this->operator++(); return rc; }
+// private:
+//     InIt it_, end_;
+//     Pred pred_;
+// }
 
 class RocksDBStorageRowTX : public StorageRowTX {
     public:
@@ -161,6 +183,109 @@ class RocksDBStorageRowTX : public StorageRowTX {
         std::string row_key_;
         explicit RocksDBStorageRowTX(std::string const& row_key, rocksdb::Transaction* txn): row_key_(row_key), txn_(txn), roptions_() {}
 
+};
+
+
+class RocksDBColumnFamilyStream : public AbstractFamilyColumnStreamImpl {
+ public:
+  /**
+   * Construct a new object.
+   *
+   * @column_family the family to iterate over. It should not change over this
+   *     objects lifetime.
+   * @column_family_name the name of this column family. It will be used to
+   *     populate the returned `CellView`s.
+   * @row_set the row set indicating which row keys include in the returned
+   *     values.
+   */
+  RocksDBColumnFamilyStream(
+    std::string const& column_family_name,
+    rocksdb::ColumnFamilyHandle* handle,
+    std::shared_ptr<StringRangeSet const> row_set
+  ): 
+    column_family_name_(column_family_name),
+    handle_(handle),
+    row_ranges_(std::move(row_set)),
+    column_ranges_(StringRangeSet::All()),
+    timestamp_ranges_(TimestampRangeSet::All()) {}
+
+  bool ApplyFilter(InternalFilter const& internal_filter) override {
+    return true;
+  }
+  bool HasValue() const override {
+    return true;
+  }
+  CellView const& Value() const override {
+    return CellView("", "", "", std::chrono::milliseconds::zero(), "");
+  }
+  bool Next(NextMode mode) override {
+    return true;
+  }
+  std::string const& column_family_name() const override { return column_family_name_; }
+
+ private:
+  std::string column_family_name_;
+  rocksdb::ColumnFamilyHandle* handle_;
+  std::shared_ptr<StringRangeSet const> row_ranges_;
+  std::vector<std::shared_ptr<re2::RE2 const>> row_regexes_;
+  mutable StringRangeSet column_ranges_;
+  std::vector<std::shared_ptr<re2::RE2 const>> column_regexes_;
+  mutable TimestampRangeSet timestamp_ranges_;
+
+};
+
+class StorageFitleredTableStream : public MergeCellStreams {
+ public:
+  StorageFitleredTableStream(
+      std::vector<std::unique_ptr<AbstractFamilyColumnStreamImpl>> cf_streams)
+      : MergeCellStreams(CreateCellStreams(std::move(cf_streams))) {}
+
+  bool ApplyFilter(InternalFilter const& internal_filter) override {
+    if (!absl::holds_alternative<FamilyNameRegex>(internal_filter) &&
+        !absl::holds_alternative<ColumnRange>(internal_filter)) {
+        return MergeCellStreams::ApplyFilter(internal_filter);
+    }
+    // internal_filter is either FamilyNameRegex or ColumnRange
+    for (auto stream_it = unfinished_streams_.begin();
+        stream_it != unfinished_streams_.end();) {
+        auto* cf_stream =
+            dynamic_cast<AbstractFamilyColumnStreamImpl*>(&(*stream_it)->impl());
+        assert(cf_stream);
+
+        if ((absl::holds_alternative<FamilyNameRegex>(internal_filter) &&
+            !re2::RE2::PartialMatch(
+                cf_stream->column_family_name(),
+                *absl::get<FamilyNameRegex>(internal_filter).regex)) ||
+            (absl::holds_alternative<ColumnRange>(internal_filter) &&
+            absl::get<ColumnRange>(internal_filter).column_family !=
+                cf_stream->column_family_name())) {
+        stream_it = unfinished_streams_.erase(stream_it);
+        continue;
+        }
+
+        if (absl::holds_alternative<ColumnRange>(internal_filter) &&
+            absl::get<ColumnRange>(internal_filter).column_family ==
+                cf_stream->column_family_name()) {
+        cf_stream->ApplyFilter(internal_filter);
+        }
+
+        stream_it++;
+    }
+
+    return true;
+  }
+
+ private:
+  static std::vector<CellStream> CreateCellStreams(
+      std::vector<std::unique_ptr<AbstractFamilyColumnStreamImpl>> cf_streams
+  ) {
+    std::vector<CellStream> res;
+    res.reserve(cf_streams.size());
+    for (auto& stream : cf_streams) {
+        res.emplace_back(std::move(stream));
+    }
+    return res;
+  }
 };
 
 class RocksDBStorage : public Storage {
@@ -376,6 +501,25 @@ class RocksDBStorage : public Storage {
             assert(iter->status().ok());
             delete iter;
             return Status();
+        }
+
+        // //std::map<std::chrono::milliseconds, std::string,
+        //                           std::greater<>>::const_iterator
+        CellStream StreamTable(
+            std::string const& table_name,
+            std::shared_ptr<StringRangeSet> range_set
+        ) {
+            std::vector<std::unique_ptr<AbstractFamilyColumnStreamImpl>> iters;
+            auto table = GetTable(table_name);
+            auto const& m = table.value().table().column_families();
+            for (auto const& it : m) {
+                const auto x = column_families_handles_map[it.first];
+                iters.push_back(std::make_unique<RocksDBColumnFamilyStream>(it.first, x, range_set));
+            }
+            //auto x = StorageFitleredTableStream(std::move(iters));
+            //auto x = new StorageFitleredTableStream(std::move(iters));
+            //return CellStream(std::unique_ptr<AbstractCellStreamImpl>(x));
+            return CellStream(std::make_unique<StorageFitleredTableStream>(std::move(iters)));
         }
 
         // Get column family type and handle
