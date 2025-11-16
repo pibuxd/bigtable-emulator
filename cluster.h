@@ -106,7 +106,11 @@ class Cluster {
    *     `/projects/{}/instances/{}/tables/{}`.
    * @return a pointer to the table or error if it doesn't exist.
    */
-  StatusOr<std::shared_ptr<Table>> FindTable(std::string const& table_name);
+  StatusOr<std::shared_ptr<Table>> FindLegacyTable(std::string const& table_name);
+
+  
+  StatusOr<std::shared_ptr<Table2>> FindTable(std::string const& table_name);
+  
 
  private:
   RocksDBStorage storage_;

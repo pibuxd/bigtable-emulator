@@ -213,7 +213,11 @@ bool Cluster::HasTable(std::string const& table_name) const {
   return storage_.HasTable(table_name);
 }
 
-StatusOr<std::shared_ptr<Table>> Cluster::FindTable(
+StatusOr<std::shared_ptr<Table2>> Cluster::FindTable(std::string const& table_name) {
+  return std::make_shared<Table2>(table_name, &storage_);
+}
+
+StatusOr<std::shared_ptr<Table>> Cluster::FindLegacyTable(
     std::string const& table_name) {
   {
     std::lock_guard<std::mutex> lock(mu_);

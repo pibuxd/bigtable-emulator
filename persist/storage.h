@@ -15,6 +15,7 @@
 #include "google/cloud/status_or.h"
 #include "google/cloud/internal/make_status.h"
 #include <google/bigtable/admin/v2/table.pb.h>
+#include <google/bigtable/v2/data.pb.h>
 
 namespace google {
 namespace cloud {
@@ -28,39 +29,53 @@ static inline google::bigtable::admin::v2::Table FakeSchema(std::string const& t
 }
 
 
-class StorageTX {
+class StorageRowTX {
     public:
-        virtual ~StorageTX() = default;
+        virtual ~StorageRowTX() = default;
         virtual Status Commit() = 0;
         virtual Status Rollback(Status s) = 0;
-        
+
         virtual Status SetCell(
-            ::google::bigtable::v2::Mutation_SetCell const& set_cell,
-            absl::optional<std::chrono::milliseconds> timestamp_override = absl::nullopt
-        ) = 0;
+            std::string const& column_qualifier,
+            std::chrono::milliseconds timestamp,
+            std::string const& value
+        ) {
+            return Status();
+        }
 
-        virtual Status AddToCell(
-            ::google::bigtable::v2::Mutation_AddToCell const& add_to_cell,
-            absl::optional<std::chrono::milliseconds> timestamp_override
-        ) = 0;
+        virtual Status UpdateCell(
+            std::string const& column_qualifier, std::chrono::milliseconds timestamp,
+            std::string& value,
+            std::function<StatusOr<std::string>(std::string const&, std::string&&)> const& update_fn
+        ) {
+            return Status();
+        }
         
-        virtual Status MergeToCell(
-            ::google::bigtable::v2::Mutation_MergeToCell const& merge_to_cell
-        ) = 0;
+        virtual Status DeleteRowColumn(
+            std::string const& column_family,
+            std::string const& column_qualifier,
+            ::google::bigtable::v2::TimestampRange const& time_range
+        ) {
+            return Status();
+        }
         
-        virtual Status DeleteFromColumn(
-            ::google::bigtable::v2::Mutation_DeleteFromColumn const& delete_from_column
-        ) = 0;
-        
-        virtual Status DeleteFromFamily(
-            ::google::bigtable::v2::Mutation_DeleteFromFamily const& delete_from_family
-        ) = 0;
+        virtual Status DeleteRowFromColumnFamily(
+            std::string const& column_family
+        ) {
+            return Status();
+        }
 
-        virtual Status DeleteFromRow() = 0;
+        virtual Status DeleteRowFromAllColumnFamilies() {
+            return Status();
+        }
 
-        virtual StatusOr<::google::bigtable::v2::ReadModifyWriteRowResponse> ReadModifyWriteRow(
-            google::bigtable::v2::ReadModifyWriteRowRequest const& request
-        ) = 0;
+        // virtual StatusOr<std::vector<std::tuple<std::string, std::string, std::chrono::milliseconds, std::string>>> ReadModifyWriteRow(
+        //     std::string const& column_family,
+        //     std::string const& column_qualifier,
+        //     std::string const& append_value,
+        // ) {
+        //     return std::vector<std::tuple<std::string, std::string, std::chrono::milliseconds, std::string>>();
+        // }
 };
 
 class Storage {
@@ -74,7 +89,7 @@ class Storage {
         virtual Status Close() = 0;
 
         // Start transaction
-        virtual std::unique_ptr<StorageTX> StartTransaction() = 0;
+        virtual std::unique_ptr<StorageRowTX> RowTransaction(std::string const& row_key) = 0;
 
         // Initialize storage
         virtual Status Open() = 0;
@@ -102,7 +117,7 @@ class Storage {
 };
 
 
-class RocksDBStorageTX : public StorageTX {
+class RocksDBStorageRowTX : public StorageRowTX {
     public:
         friend class RocksDBStorage;
         virtual Status Commit() {
@@ -129,37 +144,9 @@ class RocksDBStorageTX : public StorageTX {
             //delete txn;
             //return GetStatus(status, "Transaction commit");
         }
-        //RocksDBStorageTX(rocksdb::Transaction* txn): txn_(txn) {}
+        //RocksDBStorageRowTX(rocksdb::Transaction* txn): txn_(txn) {}
 
-        virtual Status SetCell(
-            ::google::bigtable::v2::Mutation_SetCell const& set_cell,
-            absl::optional<std::chrono::milliseconds> timestamp_override = absl::nullopt
-        ) = 0;
-
-        virtual Status AddToCell(
-            ::google::bigtable::v2::Mutation_AddToCell const& add_to_cell,
-            absl::optional<std::chrono::milliseconds> timestamp_override
-        ) = 0;
-        
-        virtual Status MergeToCell(
-            ::google::bigtable::v2::Mutation_MergeToCell const& merge_to_cell
-        ) = 0;
-        
-        virtual Status DeleteFromColumn(
-            ::google::bigtable::v2::Mutation_DeleteFromColumn const& delete_from_column
-        ) = 0;
-        
-        virtual Status DeleteFromFamily(
-            ::google::bigtable::v2::Mutation_DeleteFromFamily const& delete_from_family
-        ) = 0;
-
-        virtual Status DeleteFromRow() = 0;
-
-        virtual StatusOr<::google::bigtable::v2::ReadModifyWriteRowResponse> ReadModifyWriteRow(
-            google::bigtable::v2::ReadModifyWriteRowRequest const& request
-        ) = 0;
-
-        virtual ~RocksDBStorageTX() {
+        virtual ~RocksDBStorageRowTX() {
             if (txn_ != nullptr) {
                 delete txn_;
                 txn_ = nullptr;
@@ -168,13 +155,9 @@ class RocksDBStorageTX : public StorageTX {
     private:
         rocksdb::Transaction* txn_;
         rocksdb::ReadOptions roptions_;
-        explicit RocksDBStorageTX(rocksdb::Transaction* txn): txn_(txn), roptions_() {}
+        std::string row_key_;
+        explicit RocksDBStorageRowTX(std::string const& row_key, rocksdb::Transaction* txn): row_key_(row_key), txn_(txn), roptions_() {}
 
-        inline bool KeyExists(rocksdb::ColumnFamilyHandle* column_family, const rocksdb::Slice& key) const {
-            std::string _;
-            return //txn->KeyMayExist(roptions, column_family, key, &_) &&
-                txn_->Get(roptions_, column_family, key, &_).ok();
-        }
 };
 
 class RocksDBStorage : public Storage {
@@ -188,8 +171,8 @@ class RocksDBStorage : public Storage {
             storage_config.set_meta_column_family("bte_metadata");
         }
 
-        virtual std::unique_ptr<StorageTX> StartTransaction() {
-            return StartRocksTransaction();
+        virtual std::unique_ptr<StorageRowTX> RowTransaction(std::string const& row_key) {
+            return std::unique_ptr<RocksDBStorageRowTX>(new RocksDBStorageRowTX(row_key, StartRocksTransaction()));
         }
 
         virtual Status Close() {
@@ -267,7 +250,7 @@ class RocksDBStorage : public Storage {
             *xschema = schema;
 
             auto key = rocksdb::Slice(schema.name());
-            if(txn->KeyExists(metaHandle, key)) {
+            if(KeyExists(txn, metaHandle, key)) {
                 // Table exists
                 return AlreadyExistsError("Table already exists.", GCP_ERROR_INFO().WithMetadata(
                     "table_name", schema.name()));
@@ -276,7 +259,7 @@ class RocksDBStorage : public Storage {
             storage::TableMeta meta;
             //meta.set_allocated_table(xschema);
             meta.set_allocated_table(&schema);
-            auto status = GetStatus(txn->txn_->Put(metaHandle, key, rocksdb::Slice(SerializeTableMeta(meta))), "Put table key to metadata cf");
+            auto status = GetStatus(txn->Put(metaHandle, key, rocksdb::Slice(SerializeTableMeta(meta))), "Put table key to metadata cf");
             meta.release_table();
             // Make sure column families exist
             for(auto& cf : *meta.mutable_table()->mutable_column_families()) {
@@ -291,7 +274,7 @@ class RocksDBStorage : public Storage {
                     column_families_handles_map[cf.first] = handle;
                 }
             }
-            return txn->Commit();
+            return Commit(txn);
             //return Commit(txn);
         }
 
@@ -304,33 +287,33 @@ class RocksDBStorage : public Storage {
             
             std::string out;
             auto status = GetStatus(
-                txn->txn_->Get(roptions, metaHandle, rocksdb::Slice(table_name), &out),
+                txn->Get(roptions, metaHandle, rocksdb::Slice(table_name), &out),
                 "Get table",
                 NotFoundError("No such table.", GCP_ERROR_INFO().WithMetadata(
                     "table_name", table_name)));
             if (!status.ok()) {
                 // ?
-                return txn->Rollback(status);
+                return Rollback(txn, status);
             }
             const auto meta = DeserializeTableMeta(std::move(out));
             if (!meta.ok()) {
-                return txn->Rollback(meta.status());
+                return Rollback(txn, meta.status());
             }
             const auto precondition_status = precondition_fn(table_name, meta.value());
             if (!precondition_status.ok()) {
-                return txn->Rollback(precondition_status);
+                return Rollback(txn, precondition_status);
             }
 
             const auto delete_status = GetStatus(
-                txn->txn_->Delete(metaHandle, rocksdb::Slice(table_name)),
+                txn->Delete(metaHandle, rocksdb::Slice(table_name)),
                 "Delete table",
                 NotFoundError("No such table.", GCP_ERROR_INFO().WithMetadata(
                     "table_name", table_name)));
 
             if (!delete_status.ok()) {
-                return txn->Rollback(delete_status);
+                return Rollback(txn, delete_status);
             }
-            return txn->Commit();
+            return Commit(txn);
         }
 
         // Has table
@@ -448,10 +431,8 @@ class RocksDBStorage : public Storage {
             return absl::StrCat(row_key, "/", column_qualifier);
         }
 
-        inline std::unique_ptr<RocksDBStorageTX> StartRocksTransaction() const {
-            rocksdb::Transaction* txn = db->BeginTransaction(woptions);
-            //return std::make_unique<RocksDBStorageTX>(txn);
-            return std::unique_ptr<RocksDBStorageTX>(new RocksDBStorageTX(txn));
+        inline rocksdb::Transaction* StartRocksTransaction() const {
+            return db->BeginTransaction(woptions);
         }
 
         inline StatusOr<storage::Row> DeserializeRow(std::string&& data) const {
@@ -488,33 +469,43 @@ class RocksDBStorage : public Storage {
             return out;
         }
 
-        // inline Status Rollback(
-        //     Status status,
-        //     rocksdb::Transaction* txn
-        // ) const {
-        //     std::cout << "ROLLBACK\n";
-        //     const auto txn_status = txn->Rollback();
-        //     assert(txn_status.ok());
-        //     delete txn;
-        //     if (!status.ok()) {
-        //         return status;
-        //     }
-        //     return Status();
-        //     //delete txn;
-        //     //return GetStatus(status, "Transaction commit");
-        // }
+        inline bool KeyExists(
+            rocksdb::Transaction* txn,
+            rocksdb::ColumnFamilyHandle* column_family,
+            const rocksdb::Slice& key
+        ) const {
+            std::string _;
+            return //txn->KeyMayExist(roptions, column_family, key, &_) &&
+                txn->Get(roptions, column_family, key, &_).ok();
+        }
 
-        // inline Status Commit(
-        //     rocksdb::Transaction* txn
-        // ) const {
-        //     std::cout << "COMMIT!\n";
-        //     const auto status = txn->Commit();
-        //     assert(status.ok());
-        //     delete txn;
-        //     return Status();
-        //     //delete txn;
-        //     //return GetStatus(status, "Transaction commit");
-        // }
+        inline Status Rollback(
+            rocksdb::Transaction* txn,
+            Status status
+        ) const {
+            std::cout << "ROLLBACK\n";
+            const auto txn_status = txn->Rollback();
+            assert(txn_status.ok());
+            delete txn;
+            if (!status.ok()) {
+                return status;
+            }
+            return Status();
+            //delete txn;
+            //return GetStatus(status, "Transaction commit");
+        }
+
+        inline Status Commit(
+            rocksdb::Transaction* txn
+        ) const {
+            std::cout << "COMMIT!\n";
+            const auto status = txn->Commit();
+            assert(status.ok());
+            delete txn;
+            return Status();
+            //delete txn;
+            //return GetStatus(status, "Transaction commit");
+        }
 
         inline Status OpenDBWithRetry(
             rocksdb::Options options,

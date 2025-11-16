@@ -15,6 +15,7 @@
 #ifndef GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_TABLE_H
 #define GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_TABLE_H
 
+#include "persist/storage.h"
 #include "column_family.h"
 #include "filter.h"
 #include "range_set.h"
@@ -44,6 +45,17 @@ namespace google {
 namespace cloud {
 namespace bigtable {
 namespace emulator {
+
+
+// Stupid temporary wrapper that does nothing, just groups methods 
+class Table2 {
+  private:
+    RocksDBStorage* storage_;
+    std::string name_;
+  public:
+    Table2(std::string const& name, RocksDBStorage* storage): name_(name), storage_(storage) {}
+};
+
 
 /// Objects of this class represent Bigtable tables.
 class Table : public std::enable_shared_from_this<Table> {
