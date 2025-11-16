@@ -36,6 +36,7 @@ class StorageRowTX {
         virtual Status Rollback(Status s) = 0;
 
         virtual Status SetCell(
+            std::string const& column_family,
             std::string const& column_qualifier,
             std::chrono::milliseconds timestamp,
             std::string const& value
@@ -43,8 +44,10 @@ class StorageRowTX {
             return Status();
         }
 
-        virtual Status UpdateCell(
-            std::string const& column_qualifier, std::chrono::milliseconds timestamp,
+        virtual StatusOr<absl::optional<std::string>> UpdateCell(
+            std::string const& column_family,
+            std::string const& column_qualifier,
+            std::chrono::milliseconds timestamp,
             std::string& value,
             std::function<StatusOr<std::string>(std::string const&, std::string&&)> const& update_fn
         ) {

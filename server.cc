@@ -132,7 +132,7 @@ class EmulatorService final : public btproto::Bigtable::Service {
       grpc::ServerContext* /* context */,
       btproto::CheckAndMutateRowRequest const* request,
       btproto::CheckAndMutateRowResponse* response) override {
-    auto maybe_table = cluster_->FindLegacyTable(request->table_name());
+    auto maybe_table = cluster_->FindTable(request->table_name());
     if (!maybe_table) {
       return ToGrpcStatus(maybe_table.status());
     }
@@ -147,6 +147,7 @@ class EmulatorService final : public btproto::Bigtable::Service {
     return grpc::Status::OK;
   }
 
+  // Old method
   grpc::Status OLDCheckAndMutateRow(
       grpc::ServerContext* /* context */,
       btproto::CheckAndMutateRowRequest const* request,
