@@ -51,7 +51,7 @@ namespace emulator {
 // Stupid temporary wrapper that does nothing, just groups methods 
 class Table2 {
   private:
-    RocksDBStorage* storage_;
+    std::shared_ptr<RocksDBStorage> storage_;
     std::string name_;
 
 
@@ -64,7 +64,7 @@ class Table2 {
       return it->second.value_type();
     }
   public:
-    Table2(std::string const& name, RocksDBStorage* storage): name_(name), storage_(storage) {}
+    Table2(std::string const& name, std::shared_ptr<RocksDBStorage> storage): name_(name), storage_(storage) {}
 
     Status DoMutationsWithPossibleRollback(
       std::string const& row_key,
@@ -315,28 +315,31 @@ class Table2 {
       auto range_set = std::make_shared<StringRangeSet>();
 
       // FIXME: MAKE THIS WORK
-      // range_set->Sum(StringRangeSet::Range(row_key, false, row_key, false));
+      range_set->Sum(StringRangeSet::Range(row_key, false, row_key, false));
 
-      // StatusOr<CellStream> maybe_stream;
-      // if (request.has_predicate_filter()) {
-      //   maybe_stream =
-      //       CreateCellStream(range_set, std::move(request.predicate_filter()));
-      // } else {
-      //   maybe_stream = CreateCellStream(range_set, absl::nullopt);
-      // }
+      StatusOr<CellStream> maybe_stream;
+      if (request.has_predicate_filter()) {
+        maybe_stream =
+            CreateCellStream(range_set, std::move(request.predicate_filter()));
+      } else {
+        maybe_stream = CreateCellStream(range_set, absl::nullopt);
+      }
 
-      // if (!maybe_stream) {
-      //   return maybe_stream.status();
-      // }
+      if (!maybe_stream) {
+        return maybe_stream.status();
+      }
 
-      // bool a_cell_is_found = false;
+      bool a_cell_is_found = false;
 
-      // CellStream& stream = *maybe_stream;
-      // if (stream) {  // At least one cell/value found when filter is applied
-      //   a_cell_is_found = true;
-      // }
+      CellStream& stream = *maybe_stream;
+      if (stream) {  // At least one cell/value found when filter is applied
+        a_cell_is_found = true;
+        DBG("a_cell_is_found = true");
+      } else {
+        DBG("a_cell_is_found = false");
+      }
 
-      bool a_cell_is_found = true;
+      //bool a_cell_is_found = true;
 
       Status status;
       if (a_cell_is_found) {

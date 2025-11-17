@@ -100,7 +100,7 @@ StatusOr<btadmin::Table> Cluster::CreateTable(std::string const& table_name,
   // if (!maybe_table) {
   //   return maybe_table.status();
   // }
-  auto status = storage_.CreateTable(schema);
+  auto status = storage_->CreateTable(schema);
   if (!status.ok()) {
     return status;
   } else {
@@ -132,7 +132,7 @@ StatusOr<std::vector<btadmin::Table>> Cluster::ListTables(
   std::cout << "Listing tables with prefix " << prefix << std::endl;
 
   // NEW CODE
-  storage_.ForEachTable([&res, &view](auto const& name, auto const& meta) -> Status {
+  storage_->ForEachTable([&res, &view](auto const& name, auto const& meta) -> Status {
     auto maybe_view =
         ApplyView(name, meta.table(), view, btadmin::Table::NAME_ONLY);
     if (!maybe_view) {
@@ -161,7 +161,7 @@ StatusOr<std::vector<btadmin::Table>> Cluster::ListTables(
 StatusOr<btadmin::Table> Cluster::GetTable(std::string const& table_name,
                                            btadmin::Table_View view) const {
 
-  const auto meta = storage_.GetTable(table_name);
+  const auto meta = storage_->GetTable(table_name);
   if (!meta.ok()) {
     return meta.status();
   }
@@ -197,7 +197,7 @@ Status Cluster::DeleteTable(std::string const& table_name) {
   //   table_by_name_.erase(it);
   // }
   // return Status();
-  return storage_.DeleteTable(table_name, [](auto const& table_name, auto const& meta) -> Status {
+  return storage_->DeleteTable(table_name, [](auto const& table_name, auto const& meta) -> Status {
     if (meta.table().deletion_protection()) {
       return FailedPreconditionError(
           "The table has deletion protection.",
@@ -210,11 +210,11 @@ Status Cluster::DeleteTable(std::string const& table_name) {
 bool Cluster::HasTable(std::string const& table_name) const {
   //std::lock_guard<std::mutex> lock(mu_);
   //return table_by_name_.find(table_name) != table_by_name_.end();
-  return storage_.HasTable(table_name);
+  return storage_->HasTable(table_name);
 }
 
 StatusOr<std::shared_ptr<Table2>> Cluster::FindTable(std::string const& table_name) {
-  return std::make_shared<Table2>(table_name, &storage_);
+  return std::make_shared<Table2>(table_name, storage_);
 }
 
 StatusOr<std::shared_ptr<Table>> Cluster::FindLegacyTable(

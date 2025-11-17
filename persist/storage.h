@@ -34,6 +34,8 @@ static inline void RowDataEnsure(
     std::chrono::milliseconds const& timestamp,
     std::string const& value
 ) {
+    DBG("SETCELL timestamp is ");
+    DBG(timestamp.count());
     (*(*row.mutable_columns())[column_qualifier].mutable_cells())[timestamp.count()] = value;
 }
 
@@ -236,6 +238,7 @@ class RocksDBStorageRowTX : public StorageRowTX {
 
 
 class RocksDBColumnFamilyStream : public AbstractFamilyColumnStreamImpl {
+ friend class RocksDBStorage;
  public:
   /**
    * Construct a new object.
@@ -263,6 +266,11 @@ class RocksDBColumnFamilyStream : public AbstractFamilyColumnStreamImpl {
   std::string const& column_family_name() const override { return column_family_name_; }
 
  private:
+
+  //google::protobuf::Map<std::string, storage::RowColumnData>;
+  using TColumnRow = std::map<std::chrono::milliseconds, std::string>;
+  using TColumnFamilyRow = std::map<std::string, TColumnRow>;
+
   std::string column_family_name_;
   rocksdb::ColumnFamilyHandle* handle_;
   std::shared_ptr<StringRangeSet const> row_ranges_;
@@ -271,8 +279,52 @@ class RocksDBColumnFamilyStream : public AbstractFamilyColumnStreamImpl {
   std::vector<std::shared_ptr<re2::RE2 const>> column_regexes_;
   mutable TimestampRangeSet timestamp_ranges_;
   RocksDBStorage* db_;
-  rocksdb::Iterator* row_iter_;
-  absl::optional<storage::RowData> row_data_;
+  mutable rocksdb::Iterator* row_iter_;
+  mutable std::string row_key_;
+  mutable absl::optional<TColumnFamilyRow> row_data_;
+
+  void NextRow() const;
+
+  void InitializeIfNeeded() const;
+  /**
+   * Adjust the internal iterators after `column_it_` advanced.
+   *
+   * We need to make sure that either we reach the end of the column family or:
+   * * `column_it_` doesn't point to `end()`
+   * * `cell_it` points to a cell in the column family pointed to by
+   *     `column_it_`
+   *
+   * @return whether we've managed to find another cell in currently pointed
+   *     row.
+   */
+  bool PointToFirstCellAfterColumnChange() const;
+  /**
+   * Adjust the internal iterators after `row_it_` advanced.
+   *
+   * Similarly to `PointToFirstCellAfterColumnChange()` it ensures that all
+   * internal iterators are valid (or we've reached `end()`).
+   *
+   * @return whether we've managed to find another cell
+   */
+  bool PointToFirstCellAfterRowChange() const;
+
+  mutable absl::optional<
+      RegexFiteredMapView<StringRangeFilteredMapView<TColumnFamilyRow>>>
+      columns_;
+  mutable absl::optional<TimestampRangeFilteredMapView<TColumnRow>> cells_;
+
+  // If row_it_ == rows_.end() we've reached the end.
+  // We maintain the following invariant:
+  //   if (row_it_ != rows_.end()) then
+  //   cell_it_ != cells.end() && column_it_ != columns_.end().
+  mutable absl::optional<RegexFiteredMapView<
+      StringRangeFilteredMapView<TColumnFamilyRow>>::const_iterator>
+      column_it_;
+  mutable absl::optional<
+      TimestampRangeFilteredMapView<TColumnRow>::const_iterator>
+      cell_it_;
+  mutable absl::optional<CellView> cur_value_;
+  mutable bool initialized_{false};
 };
 
 class StorageFitleredTableStream : public MergeCellStreams {
@@ -342,6 +394,15 @@ class RocksDBStorage : public Storage {
             storage_config.set_meta_column_family("bte_metadata");
         }
 
+        void ExampleFun() {
+            DBG("ExampleFun()");
+            auto r = rocksdb::ReadOptions();
+            auto cf = column_families_handles_map["test_column_family"];
+            DBG(cf->GetName());
+            rocksdb::Iterator* iter = db->NewIterator(r, cf);
+            DBG("ExampleFun() exit");
+        }
+
         virtual std::unique_ptr<StorageRowTX> RowTransaction(std::string const& row_key) {
             return std::unique_ptr<RocksDBStorageRowTX>(new RocksDBStorageRowTX(row_key, StartRocksTransaction(), this));
         }
@@ -366,7 +427,7 @@ class RocksDBStorage : public Storage {
 
             options.create_if_missing = true;
 
-            std::cout << "STORAGE INITIALIZED!\n";
+            DBG("Storage::Open() List column families");
 
             std::vector<std::string> column_families_names;
             std::vector<rocksdb::ColumnFamilyDescriptor> column_families;
@@ -375,28 +436,34 @@ class RocksDBStorage : public Storage {
             if (!status.ok()) {
                 // We can ignore error and warn here
                 //return status;
+                DBG("Storage::Open() Listing error ignored");
             }
+            DBG("Storage::Open() After listing column families");
 
             column_families.push_back(rocksdb::ColumnFamilyDescriptor(rocksdb::kDefaultColumnFamilyName, rocksdb::ColumnFamilyOptions()));
             for (auto const& family_name : column_families_names) {
                 column_families.push_back(rocksdb::ColumnFamilyDescriptor(family_name, rocksdb::ColumnFamilyOptions()));
             }
 
+            DBG("Storage::Open() Open DB with retry");
             status = OpenDBWithRetry(options, column_families, &handles);
             if (!status.ok()) {
+                DBG(status.message());
                 return status;
             }
+            DBG("Storage::Open() Open was successfull!");
 
             // Create missing collumn family
             if (std::find(column_families_names.begin(), column_families_names.end(), storage_config.meta_column_family()) == column_families_names.end()) {
                 CFHandle cf;
-                std::cout.flush();
+                DBG("Storage::Open() Create missing meta cf");
                 status = GetStatus(db->CreateColumnFamily(rocksdb::ColumnFamilyOptions(), storage_config.meta_column_family(), &cf), "Create meta column family");
                 if (!status.ok()) {
                     return status;
                 }
                 handles.push_back(cf);
             }
+            DBG("Storage::Open() Meta cf is there!");
 
             metaHandle = nullptr;
             for (auto const& handle : handles) {
@@ -423,6 +490,7 @@ class RocksDBStorage : public Storage {
             auto key = rocksdb::Slice(schema.name());
             if(KeyExists(txn, metaHandle, key)) {
                 // Table exists
+                DBG("Storage::CreateTable() TABLE EXISTS");
                 return AlreadyExistsError("Table already exists.", GCP_ERROR_INFO().WithMetadata(
                     "table_name", schema.name()));
             }
@@ -431,21 +499,40 @@ class RocksDBStorage : public Storage {
             //meta.set_allocated_table(xschema);
             meta.set_allocated_table(&schema);
             auto status = GetStatus(txn->Put(metaHandle, key, rocksdb::Slice(SerializeTableMeta(meta))), "Put table key to metadata cf");
-            meta.release_table();
+            
+            // Commit now
+            status = Commit(txn);
+            if (!status.ok()) {
+                return status;
+            }
+
             // Make sure column families exist
-            for(auto& cf : *meta.mutable_table()->mutable_column_families()) {
+            DBG("Storage::CreateTable() Create all column families");
+            for(auto& cf : meta.table().column_families()) {
                 auto iter = column_families_handles_map.find(cf.first);
                 if (iter == column_families_handles_map.end()) {
                     // Column family from table does not exist
                     CFHandle handle;
+                    DBG("Create table cf = ");
+                    DBG(cf.first);
                     status = GetStatus(db->CreateColumnFamily(rocksdb::ColumnFamilyOptions(), cf.first, &handle), "Create table column family");
                     if (!status.ok()) {
                         return status;
                     }
+                    // Dummy row
+                    status = GetStatus(db->Put(woptions, handle, rocksdb::Slice("_"), rocksdb::Slice(SerializeRow(storage::RowData()))), "Put dummy row");
+                    if (!status.ok()) {
+                        return status;
+                    }
                     column_families_handles_map[cf.first] = handle;
+                } else {
+                    DBG("Storage::CreateTable() Table cf already exists");
+                    DBG(cf.first);
                 }
             }
-            return Commit(txn);
+            meta.release_table();
+            return Status();
+            //return Commit(txn);
             //return Commit(txn);
         }
 
@@ -546,6 +633,13 @@ class RocksDBStorage : public Storage {
             return Status();
         }
 
+        CellStream StreamTable(
+            std::string const& table_name
+        ) {
+            auto all_rows_set = std::make_shared<StringRangeSet>(StringRangeSet::All());
+            return StreamTable(table_name, all_rows_set);
+        }
+
         // //std::map<std::chrono::milliseconds, std::string,
         //                           std::greater<>>::const_iterator
         CellStream StreamTable(
@@ -557,7 +651,8 @@ class RocksDBStorage : public Storage {
             auto const& m = table.value().table().column_families();
             for (auto const& it : m) {
                 const auto x = column_families_handles_map[it.first];
-                iters.push_back(std::make_unique<RocksDBColumnFamilyStream>(it.first, x, range_set, this));
+                std::unique_ptr<AbstractFamilyColumnStreamImpl> c = std::make_unique<RocksDBColumnFamilyStream>(it.first, x, range_set, this);
+                iters.push_back(std::move(c));
             }
             //auto x = StorageFitleredTableStream(std::move(iters));
             //auto x = new StorageFitleredTableStream(std::move(iters));
@@ -852,53 +947,178 @@ inline RocksDBColumnFamilyStream::RocksDBColumnFamilyStream(
     row_ranges_(std::move(row_set)),
     column_ranges_(StringRangeSet::All()),
     timestamp_ranges_(TimestampRangeSet::All()),
-    db_(db) {
-        row_iter_ = db->db->NewIterator(db->roptions, db_->column_families_handles_map[column_family_name]);
-        row_data_ = absl::nullopt;
-}
+    db_(db), initialized_(false), row_iter_(nullptr) {
+        
+    }
 
+
+
+// bool RocksDBColumnFamilyStream::ApplyFilter(
+//     InternalFilter const& internal_filter) {
+//   assert(!initialized_);
+//   return absl::visit(FilterApply(*this), internal_filter);
+// }
 
 inline bool RocksDBColumnFamilyStream::HasValue() const {
-    return true;
+  InitializeIfNeeded();
+  return row_data_.has_value();
 }
 inline CellView const& RocksDBColumnFamilyStream::Value() const {
-    return CellView("", "", "", std::chrono::milliseconds::zero(), "");
+  InitializeIfNeeded();
+  if (!cur_value_) {
+    cur_value_ = CellView(row_key_, column_family_name_,
+                          column_it_.value()->first, cell_it_.value()->first,
+                          cell_it_.value()->second);
+  }
+  return cur_value_.value();
 }
-inline bool RocksDBColumnFamilyStream::Next(NextMode mode) {
-    if (!row_data_.has_value()) {
+
+inline void RocksDBColumnFamilyStream::NextRow() const {
+    DBG("RocksDBColumnFamilyStream::NextRow()");
+    if (!initialized_) {
         // Setup is required
+        DBG("RocksDBColumnFamilyStream::NextRow() SeekToFirst()");
         row_iter_->SeekToFirst();
-        if (!row_iter_->Valid()) {
-            // Finished iteration
-            return false;
-        }
+    }
+     if (!row_iter_->Valid()) {
+        DBG("RocksDBColumnFamilyStream::NextRow() NOT VALID ITERATOR");
+        row_data_ = absl::nullopt;
+     } else {
+        DBG("RocksDBColumnFamilyStream::NextRow() Deserialize");
+        DBG(row_iter_->key().ToString());
         auto maybe_row = db_->DeserializeRow(row_iter_->value().ToString());
         if (!maybe_row.ok()) {
-            return false;
+            return;
         }
-        row_data_ = std::move(maybe_row.value());
+        DBG("RocksDBColumnFamilyStream::NextRow() Remap");
+        auto data = TColumnFamilyRow();
+        for (auto const& i : maybe_row.value().columns()) {
+            for (auto const& j : i.second.cells()) {
+                data[i.first][std::chrono::milliseconds(j.first)] = j.second;
+            }
+        }
+        DBG("RocksDBColumnFamilyStream::NextRow() Set row data");
+        row_data_ = std::move(data);
+
+        //row_data_ = std::move(maybe_row.value());
+        DBG("RocksDBColumnFamilyStream::NextRow() Row iter next!");
+        row_key_ = row_iter_->key().ToString();
+        row_iter_->Next();
     }
-    //google::protobuf::Map<std::string, storage::RowColumnData>
-    // auto xxx_columns = RegexFiteredMapView<StringRangeFilteredMapView<google::protobuf::Map<std::string, storage::RowColumnData>>>(
-    //     StringRangeFilteredMapView<google::protobuf::Map<std::string, storage::RowColumnData>>(row_data_.value().columns(),
-    //                                                 column_ranges_),
-    //     column_regexes_);
-
-    return true;
-
-    // for (iter->SeekToFirst(); iter->Valid(); iter->Next()) {
-    //     auto meta = DeserializeTableMeta(iter->value().ToString());
-    //     if (!meta.ok()) {
-    //         return meta.status();
-    //     }
-    //     const auto fn_status = fn(iter->key().ToString(), meta.value());
-    //     if(!fn_status.ok()) {
-    //         delete iter;
-    //         return fn_status;
-    //     }
-    // }
-    // return true;
 }
+
+inline bool RocksDBColumnFamilyStream::Next(NextMode mode) {
+  InitializeIfNeeded();
+  cur_value_.reset();
+  assert(row_data_.has_value());
+  assert(column_it_.value() != columns_.value().end());
+  assert(cell_it_.value() != cells_.value().end());
+
+  if (mode == NextMode::kCell) {
+    ++(cell_it_.value());
+    if (cell_it_.value() != cells_.value().end()) {
+      return true;
+    }
+  }
+  if (mode == NextMode::kCell || mode == NextMode::kColumn) {
+    ++(column_it_.value());
+    if (PointToFirstCellAfterColumnChange()) {
+      return true;
+    }
+  }
+  NextRow();
+  PointToFirstCellAfterRowChange();
+  return true;
+}
+
+inline void RocksDBColumnFamilyStream::InitializeIfNeeded() const {
+  if (!initialized_) {
+    DBG("InitializeIfNeeded Create NewIterator()");
+    DBG(column_family_name_);
+    rocksdb::ColumnFamilyHandle* cf = nullptr;
+    for (auto const& i : db_->column_families_handles_map) {
+        if(i.first == column_family_name_) {
+            cf = i.second;
+        }
+    }
+    // db_->column_families_handles_map[column_family_name_]
+    row_iter_ = db_->db->NewIterator(db_->roptions, cf);
+    DBG("NewIterator() created");
+    row_data_ = absl::nullopt;
+    NextRow();
+    initialized_ = true;
+    PointToFirstCellAfterRowChange();
+  }
+}
+
+inline bool RocksDBColumnFamilyStream::PointToFirstCellAfterColumnChange() const {
+  for (; column_it_.value() != columns_.value().end(); ++(column_it_.value())) {
+    cells_ = TimestampRangeFilteredMapView<TColumnRow>(
+        column_it_.value()->second, timestamp_ranges_);
+    cell_it_ = cells_.value().begin();
+    if (cell_it_.value() != cells_.value().end()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+inline bool RocksDBColumnFamilyStream::PointToFirstCellAfterRowChange() const {
+  for (; row_data_.has_value(); NextRow()) {
+    // StringRangeFilteredMapView<google::protobuf::Map<std::string, storage::RowColumnData>
+    columns_ = RegexFiteredMapView<StringRangeFilteredMapView<TColumnFamilyRow>>(
+        StringRangeFilteredMapView<TColumnFamilyRow>(row_data_.value(),
+                                                    column_ranges_),
+        column_regexes_);
+    column_it_ = columns_.value().begin();
+    if (PointToFirstCellAfterColumnChange()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// inline bool RocksDBColumnFamilyStream::HasValue() const {
+//     return true;
+// }
+// inline CellView const& RocksDBColumnFamilyStream::Value() const {
+//     return CellView("", "", "", std::chrono::milliseconds::zero(), "");
+// }
+// inline bool RocksDBColumnFamilyStream::Next(NextMode mode) {
+//     if (!row_data_.has_value()) {
+//         // Setup is required
+//         row_iter_->SeekToFirst();
+//         if (!row_iter_->Valid()) {
+//             // Finished iteration
+//             return false;
+//         }
+//         auto maybe_row = db_->DeserializeRow(row_iter_->value().ToString());
+//         if (!maybe_row.ok()) {
+//             return false;
+//         }
+//         row_data_ = std::move(maybe_row.value());
+//     }
+//     //google::protobuf::Map<std::string, storage::RowColumnData>
+//     // auto xxx_columns = RegexFiteredMapView<StringRangeFilteredMapView<google::protobuf::Map<std::string, storage::RowColumnData>>>(
+//     //     StringRangeFilteredMapView<google::protobuf::Map<std::string, storage::RowColumnData>>(row_data_.value().columns(),
+//     //                                                 column_ranges_),
+//     //     column_regexes_);
+
+//     return true;
+
+//     // for (iter->SeekToFirst(); iter->Valid(); iter->Next()) {
+//     //     auto meta = DeserializeTableMeta(iter->value().ToString());
+//     //     if (!meta.ok()) {
+//     //         return meta.status();
+//     //     }
+//     //     const auto fn_status = fn(iter->key().ToString(), meta.value());
+//     //     if(!fn_status.ok()) {
+//     //         delete iter;
+//     //         return fn_status;
+//     //     }
+//     // }
+//     // return true;
+// }
 
 
 }  // namespace emulator

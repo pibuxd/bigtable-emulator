@@ -46,7 +46,7 @@ StatusOr<std::shared_ptr<Table>> CreateTable(
   return Table::Create(schema);
 }
 
-static inline void ExampleClusterCode(std::shared_ptr<Cluster> cluster) {
+static inline void ExampleClusterCode(std::shared_ptr<Cluster> cluster, std::shared_ptr<RocksDBStorage> storage) {
     DBG("Running ExampleClusterCode() from example.cc");
 
     auto const* const table_name = "projects/test/instances/test/tables/test";
@@ -69,6 +69,9 @@ static inline void ExampleClusterCode(std::shared_ptr<Cluster> cluster) {
       DBG(maybe_table.status().message());
       return;
     }
+
+    //storage.Close();
+    //storage->ExampleFun();
 
     ::google::bigtable::admin::v2::Table_View view = ::google::bigtable::admin::v2::Table_View_FULL;
     auto maybe_tables = cluster->ListTables("projects/test/instances/test", view);
@@ -122,19 +125,29 @@ static inline void ExampleClusterCode(std::shared_ptr<Cluster> cluster) {
     auto primary_table = maybe_get_table.value();
 
     auto mut_request = google::bigtable::v2::CheckAndMutateRowRequest();
-    auto mut1 = mut_request.add_true_mutations();
+    auto mut1 = mut_request.add_false_mutations();
     auto mut1_sc = mut1->mutable_set_cell();
     mut1_sc->set_family_name(column_family_name);
     mut1_sc->set_column_qualifier(column_qualifier);
     //mut1_sc->set_column_qualifier(column_qualifier);
-    mut1_sc->set_timestamp_micros(123);
+    mut1_sc->set_timestamp_micros(123*1000);
     mut1_sc->set_value("TEST_ROW_VALUE");
     mut_request.set_row_key("TEST_ROW");
 
     auto x = primary_table->CheckAndMutateRow(mut_request);
     if (!x.ok()) {
+      DBG("CheckAndMutateRow(mut_request) FAIL");
       DBG(x.status().message());
       return;
+    }
+
+    DBG("STREAM ROWS :D");
+
+    auto stream = storage->StreamTable(table_name);
+    for (; stream.HasValue(); stream.Next(NextMode::kRow)) {
+      auto& v = stream.Value();
+      auto row_msg = absl::StrCat(v.column_family(), ".", v.row_key(), ".", v.column_qualifier(), "[", v.timestamp().count(), "] = ", v.value() );
+      DBG(row_msg);
     }
 
     DBG("Done running ExampleClusterCode() from example.cc");

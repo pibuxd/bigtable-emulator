@@ -41,7 +41,7 @@ namespace emulator {
 class Cluster {
  public:
 
-   explicit Cluster(RocksDBStorage const& storage): storage_(storage) {}
+   explicit Cluster(std::shared_ptr<RocksDBStorage> storage): storage_(storage) {}
 
   /**
    * Create a new table according to schema.
@@ -114,7 +114,7 @@ class Cluster {
   
 
  private:
-  RocksDBStorage storage_;
+  std::shared_ptr<RocksDBStorage> storage_;
 
   mutable std::mutex mu_;
 

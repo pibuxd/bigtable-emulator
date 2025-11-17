@@ -358,7 +358,7 @@ class EmulatorTableService final : public btadmin::BigtableTableAdmin::Service {
 
 class DefaultEmulatorServer : public EmulatorServer {
  public:
-  DefaultEmulatorServer(std::string const& host, std::uint16_t port, RocksDBStorage const& storage)
+  DefaultEmulatorServer(std::string const& host, std::uint16_t port, std::shared_ptr<RocksDBStorage> storage)
       : bound_port_(port),
         cluster_(std::make_shared<Cluster>(storage)),
         bt_service_(cluster_),
@@ -387,8 +387,8 @@ class DefaultEmulatorServer : public EmulatorServer {
 StatusOr<std::unique_ptr<EmulatorServer>> CreateDefaultEmulatorServer(
     std::string const& host, std::uint16_t port) {
     
-  RocksDBStorage s = RocksDBStorage();
-  auto status = s.Open();
+  std::shared_ptr<RocksDBStorage> s = std::make_shared<RocksDBStorage>();
+  auto status = s->Open();
   if (!status.ok()) {
     return status;
   }
@@ -433,7 +433,7 @@ StatusOr<std::unique_ptr<EmulatorServer>> CreateDefaultEmulatorServer(
   // }
   // std::cout << "OK\n";
 
-  ExampleClusterCode(default_emulator_server->cluster_);
+  ExampleClusterCode(default_emulator_server->cluster_, s);
 
   return std::unique_ptr<EmulatorServer>(default_emulator_server);
 }
