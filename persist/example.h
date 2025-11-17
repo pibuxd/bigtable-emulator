@@ -114,7 +114,28 @@ static inline void ExampleClusterCode(std::shared_ptr<Cluster> cluster) {
     // Check existence
     assert(cluster->HasTable(table_name));
     
+    auto maybe_get_table = cluster->FindTable(table_name);
+    if (!maybe_get_table.ok()) {
+      DBG(maybe_get_table.status().message());
+      return;
+    }
+    auto primary_table = maybe_get_table.value();
 
+    auto mut_request = google::bigtable::v2::CheckAndMutateRowRequest();
+    auto mut1 = mut_request.add_true_mutations();
+    auto mut1_sc = mut1->mutable_set_cell();
+    mut1_sc->set_family_name(column_family_name);
+    mut1_sc->set_column_qualifier(column_qualifier);
+    //mut1_sc->set_column_qualifier(column_qualifier);
+    mut1_sc->set_timestamp_micros(123);
+    mut1_sc->set_value("TEST_ROW_VALUE");
+    mut_request.set_row_key("TEST_ROW");
+
+    auto x = primary_table->CheckAndMutateRow(mut_request);
+    if (!x.ok()) {
+      DBG(x.status().message());
+      return;
+    }
 
     DBG("Done running ExampleClusterCode() from example.cc");
 };

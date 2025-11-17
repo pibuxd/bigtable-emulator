@@ -20,10 +20,22 @@
 #include <google/bigtable/admin/v2/table.pb.h>
 #include <google/bigtable/v2/data.pb.h>
 
+#define DBG(TEXT) if(true){ std::cout << (TEXT) << "\n"; std::cout.flush(); }
+
+
 namespace google {
 namespace cloud {
 namespace bigtable {
 namespace emulator {
+
+static inline void RowDataEnsure(
+    storage::RowData& row,
+    std::string const& column_qualifier,
+    std::chrono::milliseconds const& timestamp,
+    std::string const& value
+) {
+    (*(*row.mutable_columns())[column_qualifier].mutable_cells())[timestamp.count()] = value;
+}
 
 static inline google::bigtable::admin::v2::Table FakeSchema(std::string const& table_name) {
   google::bigtable::admin::v2::Table schema;
@@ -33,6 +45,7 @@ static inline google::bigtable::admin::v2::Table FakeSchema(std::string const& t
 
 class StorageRowTX {
     public:
+
         virtual ~StorageRowTX() = default;
         virtual Status Commit() = 0;
         virtual Status Rollback(Status s) = 0;
@@ -142,17 +155,13 @@ class Storage {
 //     Pred pred_;
 // }
 
+class RocksDBStorage;
 class RocksDBStorageRowTX : public StorageRowTX {
+    friend class RocksDBStorage;
     public:
-        friend class RocksDBStorage;
-        virtual Status Commit() {
-            std::cout << "TX COMMIT!\n";
-            const auto status = txn_->Commit();
-            assert(status.ok());
-            delete txn_;
-            txn_ = nullptr;
-            return Status();
-        }
+        virtual ~RocksDBStorageRowTX();
+
+        virtual Status Commit();
 
         virtual Status Rollback(
             Status status
@@ -171,17 +180,57 @@ class RocksDBStorageRowTX : public StorageRowTX {
         }
         //RocksDBStorageRowTX(rocksdb::Transaction* txn): txn_(txn) {}
 
-        virtual ~RocksDBStorageRowTX() {
-            if (txn_ != nullptr) {
-                delete txn_;
-                txn_ = nullptr;
-            }
-        }
+        virtual Status SetCell(
+            std::string const& column_family,
+            std::string const& column_qualifier,
+            std::chrono::milliseconds timestamp,
+            std::string const& value
+        ) override;
+
+        inline virtual Status DeleteRowFromColumnFamily(
+            std::string const& column_family
+        ) override;
+
+        Status LoadRow(std::string const& column_family);
+
+        // Status DeleteRow(CFHandle column_family, std::string const& row_key, std::string const& column_qualifier) {
+        //     return GetStatus(db->Delete(woptions, column_family, rocksdb::Slice(RowKey(row_key, column_qualifier))), "Delete row");
+        // }
+
+        // Status PutRow(CFHandle column_family, std::string const& row_key, std::string const& column_qualifier, const storage::Row& row) {
+        //     return GetStatus(db->Put(woptions, column_family, rocksdb::Slice(RowKey(row_key, column_qualifier)), rocksdb::Slice(SerializeRow(row))), "Put row");
+        // }
+
+        // StatusOr<storage::Row> GetRow(CFHandle column_family, std::string const& row_key, std::string const& column_qualifier) {
+        //     std::string out;
+        //     auto status = GetStatus(
+        //         db->Get(roptions, column_family, rocksdb::Slice(RowKey(row_key, column_qualifier)), &out),
+        //         "Get row", 
+        //         NotFoundError("No such row.", GCP_ERROR_INFO().WithMetadata(
+        //             "column_family", column_family->GetName()).WithMetadata("column_qualifier", column_qualifier).WithMetadata("row_key", row_key)));
+        //     if (!status.ok()) {
+        //         return status;
+        //     }
+        //     return DeserializeRow(std::move(out));
+        // }
+
+        // virtual ~RocksDBStorageRowTX() {
+        //     if (txn_ != nullptr) {
+        //         delete txn_;
+        //         txn_ = nullptr;
+        //     }
+        // }
     private:
         rocksdb::Transaction* txn_;
         rocksdb::ReadOptions roptions_;
         std::string row_key_;
-        explicit RocksDBStorageRowTX(std::string const& row_key, rocksdb::Transaction* txn): row_key_(row_key), txn_(txn), roptions_() {}
+        RocksDBStorage* db_;
+        std::map<std::string, storage::RowData> data_;
+        explicit RocksDBStorageRowTX(
+            std::string const& row_key,
+            rocksdb::Transaction* txn,
+            RocksDBStorage* db
+        );
 
 };
 
@@ -201,26 +250,16 @@ class RocksDBColumnFamilyStream : public AbstractFamilyColumnStreamImpl {
   RocksDBColumnFamilyStream(
     std::string const& column_family_name,
     rocksdb::ColumnFamilyHandle* handle,
-    std::shared_ptr<StringRangeSet const> row_set
-  ): 
-    column_family_name_(column_family_name),
-    handle_(handle),
-    row_ranges_(std::move(row_set)),
-    column_ranges_(StringRangeSet::All()),
-    timestamp_ranges_(TimestampRangeSet::All()) {}
+    std::shared_ptr<StringRangeSet const> row_set,
+    RocksDBStorage* db
+  );
 
   bool ApplyFilter(InternalFilter const& internal_filter) override {
     return true;
   }
-  bool HasValue() const override {
-    return true;
-  }
-  CellView const& Value() const override {
-    return CellView("", "", "", std::chrono::milliseconds::zero(), "");
-  }
-  bool Next(NextMode mode) override {
-    return true;
-  }
+  bool HasValue() const override;
+  CellView const& Value() const override;
+  bool Next(NextMode mode) override;
   std::string const& column_family_name() const override { return column_family_name_; }
 
  private:
@@ -231,7 +270,9 @@ class RocksDBColumnFamilyStream : public AbstractFamilyColumnStreamImpl {
   mutable StringRangeSet column_ranges_;
   std::vector<std::shared_ptr<re2::RE2 const>> column_regexes_;
   mutable TimestampRangeSet timestamp_ranges_;
-
+  RocksDBStorage* db_;
+  rocksdb::Iterator* row_iter_;
+  absl::optional<storage::RowData> row_data_;
 };
 
 class StorageFitleredTableStream : public MergeCellStreams {
@@ -289,6 +330,8 @@ class StorageFitleredTableStream : public MergeCellStreams {
 };
 
 class RocksDBStorage : public Storage {
+    friend class RocksDBStorageRowTX;
+    friend class RocksDBColumnFamilyStream;
     public:
         using CFHandle = rocksdb::ColumnFamilyHandle*;
         //using CFMeta = typename Storage<rocksdb::ColumnFamilyHandle*>::CFMeta;
@@ -300,7 +343,7 @@ class RocksDBStorage : public Storage {
         }
 
         virtual std::unique_ptr<StorageRowTX> RowTransaction(std::string const& row_key) {
-            return std::unique_ptr<RocksDBStorageRowTX>(new RocksDBStorageRowTX(row_key, StartRocksTransaction()));
+            return std::unique_ptr<RocksDBStorageRowTX>(new RocksDBStorageRowTX(row_key, StartRocksTransaction(), this));
         }
 
         virtual Status Close() {
@@ -514,7 +557,7 @@ class RocksDBStorage : public Storage {
             auto const& m = table.value().table().column_families();
             for (auto const& it : m) {
                 const auto x = column_families_handles_map[it.first];
-                iters.push_back(std::make_unique<RocksDBColumnFamilyStream>(it.first, x, range_set));
+                iters.push_back(std::make_unique<RocksDBColumnFamilyStream>(it.first, x, range_set, this));
             }
             //auto x = StorageFitleredTableStream(std::move(iters));
             //auto x = new StorageFitleredTableStream(std::move(iters));
@@ -537,26 +580,26 @@ class RocksDBStorage : public Storage {
         //     return std::make_pair(cf_iter->second.value_type(), column_families_handles_map[column_family]);
         // }
 
-        Status DeleteRow(CFHandle column_family, std::string const& row_key, std::string const& column_qualifier) {
-            return GetStatus(db->Delete(woptions, column_family, rocksdb::Slice(RowKey(row_key, column_qualifier))), "Delete row");
-        }
+        // Status DeleteRow(CFHandle column_family, std::string const& row_key, std::string const& column_qualifier) {
+        //     return GetStatus(db->Delete(woptions, column_family, rocksdb::Slice(RowKey(row_key, column_qualifier))), "Delete row");
+        // }
 
-        Status PutRow(CFHandle column_family, std::string const& row_key, std::string const& column_qualifier, const storage::Row& row) {
-            return GetStatus(db->Put(woptions, column_family, rocksdb::Slice(RowKey(row_key, column_qualifier)), rocksdb::Slice(SerializeRow(row))), "Put row");
-        }
+        // Status PutRow(CFHandle column_family, std::string const& row_key, std::string const& column_qualifier, const storage::Row& row) {
+        //     return GetStatus(db->Put(woptions, column_family, rocksdb::Slice(RowKey(row_key, column_qualifier)), rocksdb::Slice(SerializeRow(row))), "Put row");
+        // }
 
-        StatusOr<storage::Row> GetRow(CFHandle column_family, std::string const& row_key, std::string const& column_qualifier) {
-            std::string out;
-            auto status = GetStatus(
-                db->Get(roptions, column_family, rocksdb::Slice(RowKey(row_key, column_qualifier)), &out),
-                "Get row", 
-                NotFoundError("No such row.", GCP_ERROR_INFO().WithMetadata(
-                    "column_family", column_family->GetName()).WithMetadata("column_qualifier", column_qualifier).WithMetadata("row_key", row_key)));
-            if (!status.ok()) {
-                return status;
-            }
-            return DeserializeRow(std::move(out));
-        }
+        // StatusOr<storage::Row> GetRow(CFHandle column_family, std::string const& row_key, std::string const& column_qualifier) {
+        //     std::string out;
+        //     auto status = GetStatus(
+        //         db->Get(roptions, column_family, rocksdb::Slice(RowKey(row_key, column_qualifier)), &out),
+        //         "Get row", 
+        //         NotFoundError("No such row.", GCP_ERROR_INFO().WithMetadata(
+        //             "column_family", column_family->GetName()).WithMetadata("column_qualifier", column_qualifier).WithMetadata("row_key", row_key)));
+        //     if (!status.ok()) {
+        //         return status;
+        //     }
+        //     return DeserializeRow(std::move(out));
+        // }
 
 
 
@@ -582,15 +625,15 @@ class RocksDBStorage : public Storage {
             return db->BeginTransaction(woptions);
         }
 
-        inline StatusOr<storage::Row> DeserializeRow(std::string&& data) const {
-            storage::Row row;
+        inline StatusOr<storage::RowData> DeserializeRow(std::string&& data) const {
+            storage::RowData row;
             if (!row.ParseFromString(data)) {
                 return StorageError("DeserializeRow()");
             }
             return row;
         }
 
-        inline std::string SerializeRow(storage::Row row) const {
+        inline std::string SerializeRow(storage::RowData row) const {
             std::string out;
             if (!row.SerializeToString(&out)) {
                 std::cout << "SERIALIZE FAILED!~~!!!!\n";
@@ -702,6 +745,160 @@ class RocksDBStorage : public Storage {
         //         txn->Get(roptions, column_family, key, &_).ok();
         // }
 };
+
+inline RocksDBStorageRowTX::~RocksDBStorageRowTX() {
+    DBG("RocksDBStorageRowTX::~RocksDBStorageRowTX()");
+    if (txn_ != nullptr) {
+        DBG("RocksDBStorageRowTX::~RocksDBStorageRowTX() Need to do rollback");
+        Rollback(Status());
+    }
+    DBG("RocksDBStorageRowTX::~RocksDBStorageRowTX() EXIT");
+}
+
+inline RocksDBStorageRowTX::RocksDBStorageRowTX(
+    std::string const& row_key,
+    rocksdb::Transaction* txn,
+    RocksDBStorage* db
+): row_key_(row_key), txn_(txn), roptions_(), db_(db), data_() {
+    // Get row here
+    //data_ = nullptr;
+}
+
+inline Status RocksDBStorageRowTX::DeleteRowFromColumnFamily(
+    std::string const& column_family
+) {
+    auto cf = db_->column_families_handles_map[column_family];
+    data_.erase(column_family);
+    return db_->GetStatus(txn_->Delete(cf, rocksdb::Slice(row_key_)), "Delete row");
+}
+
+inline Status RocksDBStorageRowTX::Commit() {
+    // Commit all column families rows
+    DBG("RocksDBStorageRowTX::Commit()");
+    for (auto const& row_entry : data_) {
+        auto cf = db_->column_families_handles_map[row_entry.first];
+        DBG("RocksDBStorageRowTX::Commit() Serialize row");
+        auto out = db_->SerializeRow(row_entry.second);
+        DBG("RocksDBStorageRowTX::Commit() Put");
+        auto status = db_->GetStatus(txn_->Put(cf, rocksdb::Slice(row_key_), rocksdb::Slice(std::move(out))), "Update commit row");
+        if (!status.ok()) {
+            DBG("RocksDBStorageRowTX::Commit() Put caused rollback");
+            return Rollback(status);
+        }
+    }
+    DBG("RocksDBStorageRowTX::Commit() Commit");
+    const auto status = txn_->Commit();
+    assert(status.ok());
+    DBG("RocksDBStorageRowTX::Commit() Delete txn");
+    delete txn_;
+    txn_ = nullptr;
+    DBG("RocksDBStorageRowTX::Commit() Exit");
+    return Status();
+}
+
+inline Status RocksDBStorageRowTX::LoadRow(std::string const& column_family) {
+    if(data_.find(column_family) == data_.end()) {
+        auto cf = db_->column_families_handles_map[column_family];
+        DBG("SETCELL: Found column family");
+        std::string out;
+        // Get won't fail if there's no row
+        auto get_status = db_->GetStatus(txn_->Get(roptions_, cf, rocksdb::Slice(row_key_), &out), "Load commit row", Status());
+        if (!get_status.ok()) {
+            return get_status;
+        }
+        // There is no such row
+        if (out.size() == 0) {
+            data_[column_family] = storage::RowData();
+        } else {
+            auto row_data = db_->DeserializeRow(std::move(out));
+            if (!row_data.ok()) {
+                return row_data.status();
+            }
+            data_[column_family] = row_data.value();
+        }
+    }
+    return Status();
+}
+
+inline Status RocksDBStorageRowTX::SetCell(
+    std::string const& column_family,
+    std::string const& column_qualifier,
+    std::chrono::milliseconds timestamp,
+    std::string const& value
+) {
+    DBG("SETCELL()");
+    // fetch column family
+    DBG("SETCELL: RowDataEnsure");
+    auto status = LoadRow(column_family);
+    if (!status.ok()) {
+        return status;
+    }
+    RowDataEnsure(data_[column_family], column_qualifier, timestamp, value);
+    DBG("SETCELL: Exit");
+    return Status();
+    //auto cells = data_[column_family].mutable_columns()->find(column_qualifier)->second.mutable_cells();
+    //data_[column_family].mutable_columns()->find(column_qualifier)->second.mutable_cells()->find(timestamp)->
+    //(*cells)[timestamp.count()] = value;
+}
+
+inline RocksDBColumnFamilyStream::RocksDBColumnFamilyStream(
+    std::string const& column_family_name,
+    rocksdb::ColumnFamilyHandle* handle,
+    std::shared_ptr<StringRangeSet const> row_set,
+    RocksDBStorage* db
+): 
+    column_family_name_(column_family_name),
+    handle_(handle),
+    row_ranges_(std::move(row_set)),
+    column_ranges_(StringRangeSet::All()),
+    timestamp_ranges_(TimestampRangeSet::All()),
+    db_(db) {
+        row_iter_ = db->db->NewIterator(db->roptions, db_->column_families_handles_map[column_family_name]);
+        row_data_ = absl::nullopt;
+}
+
+
+inline bool RocksDBColumnFamilyStream::HasValue() const {
+    return true;
+}
+inline CellView const& RocksDBColumnFamilyStream::Value() const {
+    return CellView("", "", "", std::chrono::milliseconds::zero(), "");
+}
+inline bool RocksDBColumnFamilyStream::Next(NextMode mode) {
+    if (!row_data_.has_value()) {
+        // Setup is required
+        row_iter_->SeekToFirst();
+        if (!row_iter_->Valid()) {
+            // Finished iteration
+            return false;
+        }
+        auto maybe_row = db_->DeserializeRow(row_iter_->value().ToString());
+        if (!maybe_row.ok()) {
+            return false;
+        }
+        row_data_ = std::move(maybe_row.value());
+    }
+    //google::protobuf::Map<std::string, storage::RowColumnData>
+    // auto xxx_columns = RegexFiteredMapView<StringRangeFilteredMapView<google::protobuf::Map<std::string, storage::RowColumnData>>>(
+    //     StringRangeFilteredMapView<google::protobuf::Map<std::string, storage::RowColumnData>>(row_data_.value().columns(),
+    //                                                 column_ranges_),
+    //     column_regexes_);
+
+    return true;
+
+    // for (iter->SeekToFirst(); iter->Valid(); iter->Next()) {
+    //     auto meta = DeserializeTableMeta(iter->value().ToString());
+    //     if (!meta.ok()) {
+    //         return meta.status();
+    //     }
+    //     const auto fn_status = fn(iter->key().ToString(), meta.value());
+    //     if(!fn_status.ok()) {
+    //         delete iter;
+    //         return fn_status;
+    //     }
+    // }
+    // return true;
+}
 
 
 }  // namespace emulator

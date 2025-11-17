@@ -11,8 +11,12 @@ message StorageRocksDBConfig {
   string meta_column_family = 2;
 }
 
-message Row {
-  map<uint64, string> cells = 1;
+message RowColumnData {
+  map<int64, string> cells = 1;
+}
+
+message RowData {
+  map<string, RowColumnData> columns = 1;
 }
 
 message TableMeta {

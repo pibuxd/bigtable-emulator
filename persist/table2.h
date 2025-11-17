@@ -248,18 +248,27 @@ class Table2 {
 
           //auto& column_family = maybe_column_family->get();
 
-          return txn->DeleteRowColumn(
+          auto status = txn->DeleteRowColumn(
             delete_from_column.family_name(),
             delete_from_column.column_qualifier(),
             delete_from_column.time_range()
           );
+          if (!status.ok()) {
+            return status;
+          }
         } else if (mutation.has_delete_from_family()) {
           auto const& delete_from_family = mutation.delete_from_family();
-          return txn->DeleteRowFromColumnFamily(
+          auto status = txn->DeleteRowFromColumnFamily(
             delete_from_family.family_name()
           );
+          if (!status.ok()) {
+            return status;
+          }
         } else if (mutation.has_delete_from_row()) {
-          return txn->DeleteRowFromAllColumnFamilies();
+          auto status = txn->DeleteRowFromAllColumnFamilies();
+          if (!status.ok()) {
+            return status;
+          }
         } else {
           return UnimplementedError(
               "Unsupported mutation type.",
@@ -345,6 +354,7 @@ class Table2 {
       google::bigtable::v2::CheckAndMutateRowResponse success_response;
       success_response.set_predicate_matched(a_cell_is_found);
 
+      DBG("EXIT CheckAndMutateRow()");
       return success_response;
     }
 
