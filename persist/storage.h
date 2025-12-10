@@ -28,6 +28,8 @@ namespace cloud {
 namespace bigtable {
 namespace emulator {
 
+// Helper method to set the cell
+// TODO: Maybe rename it and move it to some better place?
 static inline void RowDataEnsure(
     storage::RowData& row,
     std::string const& column_qualifier,
@@ -39,12 +41,18 @@ static inline void RowDataEnsure(
     (*(*row.mutable_columns())[column_qualifier].mutable_cells())[timestamp.count()] = value;
 }
 
+// Helper method to create dummy table schema proto
 static inline google::bigtable::admin::v2::Table FakeSchema(std::string const& table_name) {
   google::bigtable::admin::v2::Table schema;
   schema.set_name(table_name);
   return schema;
 }
 
+/**
+ * This class represents storage row transaction.
+ * Transactions in BT are row-scoped and should be atomic, so most of the things here
+ * refer to row operations.
+ */
 class StorageRowTX {
     public:
 
@@ -52,6 +60,7 @@ class StorageRowTX {
         virtual Status Commit() = 0;
         virtual Status Rollback(Status s) = 0;
 
+        // TODO: Implement RowTransaction::SetCell()
         virtual Status SetCell(
             std::string const& column_family,
             std::string const& column_qualifier,
@@ -61,6 +70,11 @@ class StorageRowTX {
             return Status();
         }
 
+        // Most of the methods in StorageRowTX directly correspond to RowTransaction::SetCell(), RowTransaction:... etc.
+        // This method is not present in RowTransaction class
+        // However we still call it in the same place as others in Table::DoMutationsWithPossibleRollback()
+        // This method should implement what ColumnFamily::UpdateCell() does
+        // TODO: Implement ColumnFamily::UpdateCell()
         virtual StatusOr<absl::optional<std::string>> UpdateCell(
             std::string const& column_family,
             std::string const& column_qualifier,
@@ -71,6 +85,10 @@ class StorageRowTX {
             return Status();
         }
         
+        // This should implement the same logic as RowTransaction::DeleteFromColumn()
+        // This method originally is called "DeleteFromColumn" but I didn't like this naming. 
+        // It just removes a column
+        // TODO: Implement RowTransaction::DeleteFromColumn()
         virtual Status DeleteRowColumn(
             std::string const& column_family,
             std::string const& column_qualifier,
@@ -79,16 +97,26 @@ class StorageRowTX {
             return Status();
         }
         
+        // Origianlly this function is implmeneted as RowTransaction::DeleteFromFamily()
+        // I didn't like this naming. 
+        // The method just deletes entire row.
+        // TODO: Implement RowTransaction::DeleteFromFamily()
         virtual Status DeleteRowFromColumnFamily(
             std::string const& column_family
         ) {
             return Status();
         }
 
+        // Originally this function is implemented as RowTransaction::DeleteFromRow()
+        // It removes the rows from ALL COLUMN FAMILIES (this is iterated version of this->DeleteRowFromColumnFamily() that iterates OVER ALL FAMILIES)
+        // This means that this method is different to other ones, because it doesn't require name of the column family
+        // TODO: Implement RowTransaction::DeleteFromRow()
         virtual Status DeleteRowFromAllColumnFamilies() {
             return Status();
         }
 
+        // TODO: Remove this
+        // I don't think this method here will be useful. Good to be removed.
         // virtual StatusOr<std::vector<std::tuple<std::string, std::string, std::chrono::milliseconds, std::string>>> ReadModifyWriteRow(
         //     std::string const& column_family,
         //     std::string const& column_qualifier,
@@ -100,11 +128,6 @@ class StorageRowTX {
 
 class Storage {
     public:
-        // Type of column family pointer
-        //using CFHandle = TCFPointer;
-        // Column family type along with the pointer
-        //using CFMeta = std::pair<google::bigtable::admin::v2::Type, CFHandle>;
-
         Storage() {};
         virtual Status Close() = 0;
 
@@ -131,33 +154,13 @@ class Storage {
 
         // Iterate tables with prefix
         virtual Status ForEachTable(std::function<Status(std::string, storage::TableMeta)>&& fn, const std::string& prefix) const = 0;
-
-        // Get column family type and handle
-        //virtual StatusOr<CFMeta> GetColumnFamily(std::string table_name, std::string column_family) = 0;
 };
 
-// class RocksDBCellIterator {
-//     typedef typename std::iterator_traits<InIt>::value_type      value_type;
-//     typedef typename std::iterator_traits<InIt>::difference_type difference_type;
-//     typedef typename std::iterator_traits<InIt>::reference       reference;
-//     typedef typename std::iterator_traits<InIt>::pointer         pointer;
-//     my_iterator(InIt it, InIt end, Pred pred): it_(it), end_(end), pred_(pred) {}
-//     bool operator== (my_iterator const& other) const { reutrn this->it_ == other.it_; }
-//     bool operator!= (my_iterator const& other) const { return !(*this == other); }
-//     reference operator*() { return *this->it_; }
-//     pointer   operator->() { return this->it_; }
-//     my_iterator& operator++() {
-//         this->it_ = std::find_if(this->it_, this->end_, this->pred_);
-//         return *this;
-//     }
-//     my_iterator operator++(int)
-//     { my_iterator rc(*this); this->operator++(); return rc; }
-// private:
-//     InIt it_, end_;
-//     Pred pred_;
-// }
-
+// TODO: Later we will clean it up. For now this is header only.
+// We would proabably need to split it into header+compilation unit so this forward decl won't be necessary
 class RocksDBStorage;
+
+// Transaction implementation
 class RocksDBStorageRowTX : public StorageRowTX {
     friend class RocksDBStorage;
     public:
@@ -177,10 +180,7 @@ class RocksDBStorageRowTX : public StorageRowTX {
                 return status;
             }
             return Status();
-            //delete txn;
-            //return GetStatus(status, "Transaction commit");
         }
-        //RocksDBStorageRowTX(rocksdb::Transaction* txn): txn_(txn) {}
 
         virtual Status SetCell(
             std::string const& column_family,
@@ -194,40 +194,15 @@ class RocksDBStorageRowTX : public StorageRowTX {
         ) override;
 
         Status LoadRow(std::string const& column_family);
-
-        // Status DeleteRow(CFHandle column_family, std::string const& row_key, std::string const& column_qualifier) {
-        //     return GetStatus(db->Delete(woptions, column_family, rocksdb::Slice(RowKey(row_key, column_qualifier))), "Delete row");
-        // }
-
-        // Status PutRow(CFHandle column_family, std::string const& row_key, std::string const& column_qualifier, const storage::Row& row) {
-        //     return GetStatus(db->Put(woptions, column_family, rocksdb::Slice(RowKey(row_key, column_qualifier)), rocksdb::Slice(SerializeRow(row))), "Put row");
-        // }
-
-        // StatusOr<storage::Row> GetRow(CFHandle column_family, std::string const& row_key, std::string const& column_qualifier) {
-        //     std::string out;
-        //     auto status = GetStatus(
-        //         db->Get(roptions, column_family, rocksdb::Slice(RowKey(row_key, column_qualifier)), &out),
-        //         "Get row", 
-        //         NotFoundError("No such row.", GCP_ERROR_INFO().WithMetadata(
-        //             "column_family", column_family->GetName()).WithMetadata("column_qualifier", column_qualifier).WithMetadata("row_key", row_key)));
-        //     if (!status.ok()) {
-        //         return status;
-        //     }
-        //     return DeserializeRow(std::move(out));
-        // }
-
-        // virtual ~RocksDBStorageRowTX() {
-        //     if (txn_ != nullptr) {
-        //         delete txn_;
-        //         txn_ = nullptr;
-        //     }
-        // }
     private:
         rocksdb::Transaction* txn_;
         rocksdb::ReadOptions roptions_;
         std::string row_key_;
         RocksDBStorage* db_;
+        
+        // This is loaded row data. We load it lazily
         std::map<std::string, storage::RowData> data_;
+
         explicit RocksDBStorageRowTX(
             std::string const& row_key,
             rocksdb::Transaction* txn,
@@ -236,7 +211,8 @@ class RocksDBStorageRowTX : public StorageRowTX {
 
 };
 
-
+// This is stupid implementation of the column stream
+// You have implementation later in this file
 class RocksDBColumnFamilyStream : public AbstractFamilyColumnStreamImpl {
  friend class RocksDBStorage;
  public:
@@ -267,7 +243,6 @@ class RocksDBColumnFamilyStream : public AbstractFamilyColumnStreamImpl {
 
  private:
 
-  //google::protobuf::Map<std::string, storage::RowColumnData>;
   using TColumnRow = std::map<std::chrono::milliseconds, std::string>;
   using TColumnFamilyRow = std::map<std::string, TColumnRow>;
 
@@ -327,6 +302,12 @@ class RocksDBColumnFamilyStream : public AbstractFamilyColumnStreamImpl {
   mutable bool initialized_{false};
 };
 
+// This is special version of merge cell stream (for multiple column families)
+// this was copied from FilteredTableStream
+// The only difference is that we use "AbstractFamilyColumnStreamImpl" instead of "FilteredColumnFamilyStream" type
+// (So this exists only for type compatibility)
+//
+// Later we can just get rid of original FilteredTableStream (this class is more generic thus better ;))
 class StorageFitleredTableStream : public MergeCellStreams {
  public:
   StorageFitleredTableStream(
@@ -381,19 +362,22 @@ class StorageFitleredTableStream : public MergeCellStreams {
   }
 };
 
+// Implementation of the RocksDB storage >:3c
 class RocksDBStorage : public Storage {
     friend class RocksDBStorageRowTX;
     friend class RocksDBColumnFamilyStream;
     public:
+        // This isn't that useful. Maybe you can find better name for it?
         using CFHandle = rocksdb::ColumnFamilyHandle*;
-        //using CFMeta = typename Storage<rocksdb::ColumnFamilyHandle*>::CFMeta;
 
         RocksDBStorage() {
             storage_config = storage::StorageRocksDBConfig();
+            // TODO: Change the path here:
             storage_config.set_db_path("/tmp/rocksdb-for-bigtable-test4");
             storage_config.set_meta_column_family("bte_metadata");
         }
 
+        // TODO: Remove
         void ExampleFun() {
             DBG("ExampleFun()");
             auto r = rocksdb::ReadOptions();
@@ -403,6 +387,7 @@ class RocksDBStorage : public Storage {
             DBG("ExampleFun() exit");
         }
 
+        // Start transaction
         virtual std::unique_ptr<StorageRowTX> RowTransaction(std::string const& row_key) {
             return std::unique_ptr<RocksDBStorageRowTX>(new RocksDBStorageRowTX(row_key, StartRocksTransaction(), this));
         }
@@ -640,8 +625,6 @@ class RocksDBStorage : public Storage {
             return StreamTable(table_name, all_rows_set);
         }
 
-        // //std::map<std::chrono::milliseconds, std::string,
-        //                           std::greater<>>::const_iterator
         CellStream StreamTable(
             std::string const& table_name,
             std::shared_ptr<StringRangeSet> range_set
@@ -654,52 +637,9 @@ class RocksDBStorage : public Storage {
                 std::unique_ptr<AbstractFamilyColumnStreamImpl> c = std::make_unique<RocksDBColumnFamilyStream>(it.first, x, range_set, this);
                 iters.push_back(std::move(c));
             }
-            //auto x = StorageFitleredTableStream(std::move(iters));
-            //auto x = new StorageFitleredTableStream(std::move(iters));
-            //return CellStream(std::unique_ptr<AbstractCellStreamImpl>(x));
             return CellStream(std::make_unique<StorageFitleredTableStream>(std::move(iters)));
         }
 
-        // Get column family type and handle
-        // StatusOr<CFMeta> __GetColumnFamily(std::string table_name, std::string column_family) {
-        //     auto meta = GetTable(table_name);
-        //     if (!meta.ok()) {
-        //         return meta.status();
-        //     }
-        //     auto cfs = meta.value().mutable_table()->mutable_column_families();
-        //     auto cf_iter = cfs->find(column_family);
-        //     if (cf_iter == cfs->end()) {
-        //         return NotFoundError("No such column family.", GCP_ERROR_INFO().WithMetadata(
-        //             "table_name", table_name).WithMetadata("column_family", column_family));
-        //     }
-        //     return std::make_pair(cf_iter->second.value_type(), column_families_handles_map[column_family]);
-        // }
-
-        // Status DeleteRow(CFHandle column_family, std::string const& row_key, std::string const& column_qualifier) {
-        //     return GetStatus(db->Delete(woptions, column_family, rocksdb::Slice(RowKey(row_key, column_qualifier))), "Delete row");
-        // }
-
-        // Status PutRow(CFHandle column_family, std::string const& row_key, std::string const& column_qualifier, const storage::Row& row) {
-        //     return GetStatus(db->Put(woptions, column_family, rocksdb::Slice(RowKey(row_key, column_qualifier)), rocksdb::Slice(SerializeRow(row))), "Put row");
-        // }
-
-        // StatusOr<storage::Row> GetRow(CFHandle column_family, std::string const& row_key, std::string const& column_qualifier) {
-        //     std::string out;
-        //     auto status = GetStatus(
-        //         db->Get(roptions, column_family, rocksdb::Slice(RowKey(row_key, column_qualifier)), &out),
-        //         "Get row", 
-        //         NotFoundError("No such row.", GCP_ERROR_INFO().WithMetadata(
-        //             "column_family", column_family->GetName()).WithMetadata("column_qualifier", column_qualifier).WithMetadata("row_key", row_key)));
-        //     if (!status.ok()) {
-        //         return status;
-        //     }
-        //     return DeserializeRow(std::move(out));
-        // }
-
-
-
-    //     std::string const& row_key, std::string const& column_qualifier,
-    // std::chrono::milliseconds timestamp, std::string const& value) {
 
     private:
         storage::StorageRocksDBConfig storage_config;
@@ -711,10 +651,6 @@ class RocksDBStorage : public Storage {
         rocksdb::TransactionDB* db;
         CFHandle metaHandle = nullptr;
         std::map<std::string, CFHandle> column_families_handles_map;
-
-        static inline std::string RowKey(std::string const& row_key, std::string const& column_qualifier) {
-            return absl::StrCat(row_key, "/", column_qualifier);
-        }
 
         inline rocksdb::Transaction* StartRocksTransaction() const {
             return db->BeginTransaction(woptions);
@@ -776,8 +712,6 @@ class RocksDBStorage : public Storage {
                 return status;
             }
             return Status();
-            //delete txn;
-            //return GetStatus(status, "Transaction commit");
         }
 
         inline Status Commit(
@@ -788,8 +722,6 @@ class RocksDBStorage : public Storage {
             assert(status.ok());
             delete txn;
             return Status();
-            //delete txn;
-            //return GetStatus(status, "Transaction commit");
         }
 
         inline Status OpenDBWithRetry(
@@ -834,11 +766,6 @@ class RocksDBStorage : public Storage {
             return Status();
         }
 
-        // inline bool KeyExists(rocksdb::Transaction* txn, rocksdb::ColumnFamilyHandle* column_family, const rocksdb::Slice& key) const {
-        //     std::string _;
-        //     return //txn->KeyMayExist(roptions, column_family, key, &_) &&
-        //         txn->Get(roptions, column_family, key, &_).ok();
-        // }
 };
 
 inline RocksDBStorageRowTX::~RocksDBStorageRowTX() {
@@ -855,8 +782,7 @@ inline RocksDBStorageRowTX::RocksDBStorageRowTX(
     rocksdb::Transaction* txn,
     RocksDBStorage* db
 ): row_key_(row_key), txn_(txn), roptions_(), db_(db), data_() {
-    // Get row here
-    //data_ = nullptr;
+    // TODO: Nothing happens here, lol
 }
 
 inline Status RocksDBStorageRowTX::DeleteRowFromColumnFamily(
@@ -931,9 +857,6 @@ inline Status RocksDBStorageRowTX::SetCell(
     RowDataEnsure(data_[column_family], column_qualifier, timestamp, value);
     DBG("SETCELL: Exit");
     return Status();
-    //auto cells = data_[column_family].mutable_columns()->find(column_qualifier)->second.mutable_cells();
-    //data_[column_family].mutable_columns()->find(column_qualifier)->second.mutable_cells()->find(timestamp)->
-    //(*cells)[timestamp.count()] = value;
 }
 
 inline RocksDBColumnFamilyStream::RocksDBColumnFamilyStream(
@@ -948,16 +871,9 @@ inline RocksDBColumnFamilyStream::RocksDBColumnFamilyStream(
     column_ranges_(StringRangeSet::All()),
     timestamp_ranges_(TimestampRangeSet::All()),
     db_(db), initialized_(false), row_iter_(nullptr) {
-        
+        // TODO: Nothing happens here, lol
     }
 
-
-
-// bool RocksDBColumnFamilyStream::ApplyFilter(
-//     InternalFilter const& internal_filter) {
-//   assert(!initialized_);
-//   return absl::visit(FilterApply(*this), internal_filter);
-// }
 
 inline bool RocksDBColumnFamilyStream::HasValue() const {
   InitializeIfNeeded();
@@ -1077,48 +993,6 @@ inline bool RocksDBColumnFamilyStream::PointToFirstCellAfterRowChange() const {
   }
   return false;
 }
-
-// inline bool RocksDBColumnFamilyStream::HasValue() const {
-//     return true;
-// }
-// inline CellView const& RocksDBColumnFamilyStream::Value() const {
-//     return CellView("", "", "", std::chrono::milliseconds::zero(), "");
-// }
-// inline bool RocksDBColumnFamilyStream::Next(NextMode mode) {
-//     if (!row_data_.has_value()) {
-//         // Setup is required
-//         row_iter_->SeekToFirst();
-//         if (!row_iter_->Valid()) {
-//             // Finished iteration
-//             return false;
-//         }
-//         auto maybe_row = db_->DeserializeRow(row_iter_->value().ToString());
-//         if (!maybe_row.ok()) {
-//             return false;
-//         }
-//         row_data_ = std::move(maybe_row.value());
-//     }
-//     //google::protobuf::Map<std::string, storage::RowColumnData>
-//     // auto xxx_columns = RegexFiteredMapView<StringRangeFilteredMapView<google::protobuf::Map<std::string, storage::RowColumnData>>>(
-//     //     StringRangeFilteredMapView<google::protobuf::Map<std::string, storage::RowColumnData>>(row_data_.value().columns(),
-//     //                                                 column_ranges_),
-//     //     column_regexes_);
-
-//     return true;
-
-//     // for (iter->SeekToFirst(); iter->Valid(); iter->Next()) {
-//     //     auto meta = DeserializeTableMeta(iter->value().ToString());
-//     //     if (!meta.ok()) {
-//     //         return meta.status();
-//     //     }
-//     //     const auto fn_status = fn(iter->key().ToString(), meta.value());
-//     //     if(!fn_status.ok()) {
-//     //         delete iter;
-//     //         return fn_status;
-//     //     }
-//     // }
-//     // return true;
-// }
 
 
 }  // namespace emulator

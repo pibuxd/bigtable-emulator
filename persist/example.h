@@ -70,6 +70,7 @@ static inline void ExampleClusterCode(std::shared_ptr<Cluster> cluster, std::sha
       return;
     }
 
+    // TODO: Remove
     //storage.Close();
     //storage->ExampleFun();
 
@@ -129,7 +130,6 @@ static inline void ExampleClusterCode(std::shared_ptr<Cluster> cluster, std::sha
     auto mut1_sc = mut1->mutable_set_cell();
     mut1_sc->set_family_name(column_family_name);
     mut1_sc->set_column_qualifier(column_qualifier);
-    //mut1_sc->set_column_qualifier(column_qualifier);
     mut1_sc->set_timestamp_micros(123*1000);
     mut1_sc->set_value("TEST_ROW_VALUE");
     mut_request.set_row_key("TEST_ROW");

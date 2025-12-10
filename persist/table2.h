@@ -1,17 +1,9 @@
-// Copyright 2024 Google LLC
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// https://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
+/**
+ * Rewrite of the table interface.
+ * Most of the OOP classes are too interdependent, so the best way to migrate was to copy the class.
+ * This class have no CC compilation unit and FOR NOW is header only (static inline methods)
+ * - for easier development.
+ **/
 #ifndef GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_TABLE2_H
 #define GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_TABLE2_H
 
@@ -48,7 +40,9 @@ namespace bigtable {
 namespace emulator {
 
 
-// Stupid temporary wrapper that does nothing, just groups methods 
+/**
+ * Stupid wrapper that just temporarily group common methods together.
+ */
 class Table2 {
   private:
     std::shared_ptr<RocksDBStorage> storage_;
@@ -70,6 +64,7 @@ class Table2 {
       std::string const& row_key,
       google::protobuf::RepeatedPtrField<google::bigtable::v2::Mutation> const& mutations
     ) {
+      // This handling logic was copied from table.cc - Table::DoMutationsWithPossibleRollback()
       if (row_key.size() > kMaxRowLen) {
         return InvalidArgumentError(
             "The row_key is longer than 4KiB",
@@ -77,7 +72,6 @@ class Table2 {
                                           absl::StrFormat("%zu", row_key.size())));
       }
 
-      //RowTransaction row_transaction(this->get(), row_key);
       auto txn = storage_->RowTransaction(row_key);
 
       for (auto const& mutation : mutations) {
@@ -217,10 +211,6 @@ class Table2 {
               GCP_ERROR_INFO().WithMetadata("mutation", mutation.DebugString()));
         } else if (mutation.has_delete_from_column()) {
           auto const& delete_from_column = mutation.delete_from_column();
-          // auto maybe_column_family = table_->FindColumnFamily(delete_from_column);
-          // if (!maybe_column_family.ok()) {
-          //   return maybe_column_family.status();
-          // }
 
           // We need to check if the given timerange is empty or reversed, but
           // only up to the server's time accuracy (in our case, milliseconds)
@@ -245,8 +235,6 @@ class Table2 {
                                                 delete_from_column.DebugString()));
             }
           }
-
-          //auto& column_family = maybe_column_family->get();
 
           auto status = txn->DeleteRowColumn(
             delete_from_column.family_name(),
@@ -279,7 +267,6 @@ class Table2 {
       // If we get here, all mutations on the row have succeeded. We can
       // commit and return which will prevent the destructor from undoing
       // the transaction.
-      //row_transaction.commit();
       return txn->Commit();
     }
 
@@ -314,7 +301,6 @@ class Table2 {
 
       auto range_set = std::make_shared<StringRangeSet>();
 
-      // FIXME: MAKE THIS WORK
       range_set->Sum(StringRangeSet::Range(row_key, false, row_key, false));
 
       StatusOr<CellStream> maybe_stream;
@@ -338,8 +324,6 @@ class Table2 {
       } else {
         DBG("a_cell_is_found = false");
       }
-
-      //bool a_cell_is_found = true;
 
       Status status;
       if (a_cell_is_found) {

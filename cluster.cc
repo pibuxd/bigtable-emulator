@@ -143,6 +143,7 @@ StatusOr<std::vector<btadmin::Table>> Cluster::ListTables(
   }, prefix);
   return res;
 
+  // TODO: Remove this old code:
   // for (auto name_and_table_it = table_by_name_copy.upper_bound(prefix);
   //      name_and_table_it != table_by_name_copy.end() &&
   //      absl::StartsWith(name_and_table_it->first, prefix);
@@ -167,6 +168,7 @@ StatusOr<btadmin::Table> Cluster::GetTable(std::string const& table_name,
   }
   return meta.value().table();
 
+  // TODO: Remove this old code:
   // std::shared_ptr<Table> found_table;
   // {
   //   std::lock_guard<std::mutex> lock(mu_);
@@ -182,6 +184,7 @@ StatusOr<btadmin::Table> Cluster::GetTable(std::string const& table_name,
 }
 
 Status Cluster::DeleteTable(std::string const& table_name) {
+  // TODO: Remove this old code:
   // {
   //   std::lock_guard<std::mutex> lock(mu_);
   //   auto it = table_by_name_.find(table_name);
@@ -208,6 +211,7 @@ Status Cluster::DeleteTable(std::string const& table_name) {
 }
 
 bool Cluster::HasTable(std::string const& table_name) const {
+  // TODO: Remove this old code:
   //std::lock_guard<std::mutex> lock(mu_);
   //return table_by_name_.find(table_name) != table_by_name_.end();
   return storage_->HasTable(table_name);
@@ -217,6 +221,9 @@ StatusOr<std::shared_ptr<Table2>> Cluster::FindTable(std::string const& table_na
   return std::make_shared<Table2>(table_name, storage_);
 }
 
+// This is legacy method
+// TODO: After migration is complete this shall be removed.
+// It returns the "old" version of the table class
 StatusOr<std::shared_ptr<Table>> Cluster::FindLegacyTable(
     std::string const& table_name) {
   {
