@@ -57,9 +57,9 @@ Data is grouped in the following way:
 
 So the data models looks like this:
 
+![Storage diagram](https://github.com/pibuxd/bigtable-emulator/blob/styczynski/rewrite-cleanup/static/storage_diagram.png)
 
-
-*VERY IMPORTANT NOTE:* Protobufs does not preserve ordering of keys according to spec. In BT we have strict ordering of increasing timestamps (see `std::map<std::chrono::milliseconds, std::string, std::greater<>> cells_;` in `column_family.h`)
+**VERY IMPORTANT NOTE:** Protobufs does not preserve ordering of keys according to spec. In BT we have strict ordering of increasing timestamps (see `std::map<std::chrono::milliseconds, std::string, std::greater<>> cells_;` in `column_family.h`)
 This means that we need to do some suboptimal stuff in `storage.h`. To stream rows we need to construct iterator. As we group the data we load one row at the time see `RocksDBStorageRowTX::LoadRow()`. When it happens we 
 need to map protobuf into C++ map to get correct ordering. I think this is avoidable somehow, but that kind of performance issue isn't our highest-priority concert right now.
 
