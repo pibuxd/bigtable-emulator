@@ -60,7 +60,6 @@ class StorageRowTX {
         virtual Status Commit() = 0;
         virtual Status Rollback(Status s) = 0;
 
-        // TODO: Implement RowTransaction::SetCell()
         virtual Status SetCell(
             std::string const& column_family,
             std::string const& column_qualifier,
@@ -70,11 +69,6 @@ class StorageRowTX {
             return Status();
         }
 
-        // Most of the methods in StorageRowTX directly correspond to RowTransaction::SetCell(), RowTransaction:... etc.
-        // This method is not present in RowTransaction class
-        // However we still call it in the same place as others in Table::DoMutationsWithPossibleRollback()
-        // This method should implement what ColumnFamily::UpdateCell() does
-        // TODO: Implement ColumnFamily::UpdateCell()
         virtual StatusOr<absl::optional<std::string>> UpdateCell(
             std::string const& column_family,
             std::string const& column_qualifier,
@@ -85,10 +79,6 @@ class StorageRowTX {
             return Status();
         }
         
-        // This should implement the same logic as RowTransaction::DeleteFromColumn()
-        // This method originally is called "DeleteFromColumn" but I didn't like this naming. 
-        // It just removes a column
-        // TODO: Implement RowTransaction::DeleteFromColumn()
         virtual Status DeleteRowColumn(
             std::string const& column_family,
             std::string const& column_qualifier,
@@ -97,45 +87,29 @@ class StorageRowTX {
             return Status();
         }
         
-        // Origianlly this function is implmeneted as RowTransaction::DeleteFromFamily()
-        // I didn't like this naming. 
-        // The method just deletes entire row.
-        // TODO: Implement RowTransaction::DeleteFromFamily()
         virtual Status DeleteRowFromColumnFamily(
             std::string const& column_family
         ) {
             return Status();
         }
 
-        // Originally this function is implemented as RowTransaction::DeleteFromRow()
-        // It removes the rows from ALL COLUMN FAMILIES (this is iterated version of this->DeleteRowFromColumnFamily() that iterates OVER ALL FAMILIES)
-        // This means that this method is different to other ones, because it doesn't require name of the column family
-        // TODO: Implement RowTransaction::DeleteFromRow()
         virtual Status DeleteRowFromAllColumnFamilies() {
             return Status();
         }
-
-        // TODO: Remove this
-        // I don't think this method here will be useful. Good to be removed.
-        // virtual StatusOr<std::vector<std::tuple<std::string, std::string, std::chrono::milliseconds, std::string>>> ReadModifyWriteRow(
-        //     std::string const& column_family,
-        //     std::string const& column_qualifier,
-        //     std::string const& append_value,
-        // ) {
-        //     return std::vector<std::tuple<std::string, std::string, std::chrono::milliseconds, std::string>>();
         // }
 };
 
 class Storage {
     public:
         Storage() {};
+        virtual ~Storage() = default;
         virtual Status Close() = 0;
 
         // Start transaction
         virtual std::unique_ptr<StorageRowTX> RowTransaction(std::string const& row_key) = 0;
 
         // Initialize storage
-        virtual Status Open() = 0;
+        virtual Status Open(std::vector<std::string> additional_cf_names = {}) = 0;
 
         // Create table
         virtual Status CreateTable(google::bigtable::admin::v2::Table& schema) = 0;
@@ -156,8 +130,6 @@ class Storage {
         virtual Status ForEachTable(std::function<Status(std::string, storage::TableMeta)>&& fn, const std::string& prefix) const = 0;
 };
 
-// TODO: Later we will clean it up. For now this is header only.
-// We would proabably need to split it into header+compilation unit so this forward decl won't be necessary
 class RocksDBStorage;
 
 // Transaction implementation
@@ -188,6 +160,22 @@ class RocksDBStorageRowTX : public StorageRowTX {
             std::chrono::milliseconds timestamp,
             std::string const& value
         ) override;
+
+        virtual StatusOr<absl::optional<std::string>> UpdateCell(
+            std::string const& column_family,
+            std::string const& column_qualifier,
+            std::chrono::milliseconds timestamp,
+            std::string& value,
+            std::function<StatusOr<std::string>(std::string const&, std::string&&)> const& update_fn
+        ) override;
+
+        virtual Status DeleteRowColumn(
+            std::string const& column_family,
+            std::string const& column_qualifier,
+            ::google::bigtable::v2::TimestampRange const& time_range
+        ) override;
+
+        virtual Status DeleteRowFromAllColumnFamilies() override;
 
         inline virtual Status DeleteRowFromColumnFamily(
             std::string const& column_family
@@ -372,19 +360,26 @@ class RocksDBStorage : public Storage {
 
         RocksDBStorage() {
             storage_config = storage::StorageRocksDBConfig();
-            // TODO: Change the path here:
+            // TODO: Make DB path configurable via environment variable or config file
             storage_config.set_db_path("/tmp/rocksdb-for-bigtable-test4");
             storage_config.set_meta_column_family("bte_metadata");
         }
+        
+        virtual ~RocksDBStorage() {
+            if (db != nullptr) {
+                for (auto& pair : column_families_handles_map) {
+                    delete pair.second;
+                }
+                column_families_handles_map.clear();
+                delete db;
+                db = nullptr;
+            }
+        }
 
-        // TODO: Remove
         void ExampleFun() {
-            DBG("ExampleFun()");
             auto r = rocksdb::ReadOptions();
             auto cf = column_families_handles_map["test_column_family"];
-            DBG(cf->GetName());
             rocksdb::Iterator* iter = db->NewIterator(r, cf);
-            DBG("ExampleFun() exit");
         }
 
         // Start transaction
@@ -404,7 +399,7 @@ class RocksDBStorage : public Storage {
         }
 
         // Initialize storage
-        virtual Status Open() {
+        virtual Status Open(std::vector<std::string> additional_cf_names = {}) {
             options = rocksdb::Options();
             txn_options = rocksdb::TransactionDBOptions();
             woptions = rocksdb::WriteOptions();
@@ -412,113 +407,187 @@ class RocksDBStorage : public Storage {
 
             options.create_if_missing = true;
 
-            DBG("Storage::Open() List column families");
+            std::vector<std::string> existing_cf_names;
+            auto status = rocksdb::TransactionDB::ListColumnFamilies(
+                options, storage_config.db_path(), &existing_cf_names);
+            bool is_new_database = !status.ok();
+            if (is_new_database) {
+                DBG("Storage::Open() No existing DB, will create new one");
+                existing_cf_names.clear();
+                // New database - start with just default CF
+                existing_cf_names.push_back(rocksdb::kDefaultColumnFamilyName);
+            }
 
-            std::vector<std::string> column_families_names;
+            // Build set of all column families we need
+            std::set<std::string> all_cf_set;
+            for (auto const& cf_name : existing_cf_names) {
+                all_cf_set.insert(cf_name);
+            }
+            
+            // Add additional CFs from parameter
+            for (auto const& cf_name : additional_cf_names) {
+                all_cf_set.insert(cf_name);
+            }
+            
+            // Always need meta CF
+            bool need_meta_cf = all_cf_set.find(storage_config.meta_column_family()) == all_cf_set.end();
+            if (need_meta_cf) {
+                all_cf_set.insert(storage_config.meta_column_family());
+            }
+
             std::vector<rocksdb::ColumnFamilyDescriptor> column_families;
+            for (auto const& cf_name : all_cf_set) {
+                column_families.push_back(rocksdb::ColumnFamilyDescriptor(
+                    cf_name, rocksdb::ColumnFamilyOptions()));
+            }
+
             std::vector<CFHandle> handles;
-            auto status = GetStatus(rocksdb::TransactionDB::ListColumnFamilies(options, storage_config.db_path(), &column_families_names), "List column families");
-            if (!status.ok()) {
-                // We can ignore error and warn here
-                //return status;
-                DBG("Storage::Open() Listing error ignored");
-            }
-            DBG("Storage::Open() After listing column families");
-
-            column_families.push_back(rocksdb::ColumnFamilyDescriptor(rocksdb::kDefaultColumnFamilyName, rocksdb::ColumnFamilyOptions()));
-            for (auto const& family_name : column_families_names) {
-                column_families.push_back(rocksdb::ColumnFamilyDescriptor(family_name, rocksdb::ColumnFamilyOptions()));
-            }
-
-            DBG("Storage::Open() Open DB with retry");
-            status = OpenDBWithRetry(options, column_families, &handles);
-            if (!status.ok()) {
-                DBG(status.message());
-                return status;
-            }
-            DBG("Storage::Open() Open was successfull!");
-
-            // Create missing collumn family
-            if (std::find(column_families_names.begin(), column_families_names.end(), storage_config.meta_column_family()) == column_families_names.end()) {
-                CFHandle cf;
-                DBG("Storage::Open() Create missing meta cf");
-                status = GetStatus(db->CreateColumnFamily(rocksdb::ColumnFamilyOptions(), storage_config.meta_column_family(), &cf), "Create meta column family");
-                if (!status.ok()) {
-                    return status;
+            auto open_status = OpenDBWithRetry(options, column_families, &handles);
+            
+            // If we're creating a new DB and need meta CF, we need to do a two-step process
+            if (is_new_database && need_meta_cf && !open_status.ok()) {
+                std::vector<rocksdb::ColumnFamilyDescriptor> minimal_cfs;
+                minimal_cfs.push_back(rocksdb::ColumnFamilyDescriptor(
+                    rocksdb::kDefaultColumnFamilyName, rocksdb::ColumnFamilyOptions()));
+                
+                open_status = OpenDBWithRetry(options, minimal_cfs, &handles);
+                if (!open_status.ok()) {
+                    DBG("Failed to create new DB: " + open_status.message());
+                    return open_status;
                 }
-                handles.push_back(cf);
+                
+                // Step 2: Add meta column family
+                CFHandle meta_cf_handle;
+                auto create_cf_status = db->CreateColumnFamily(
+                    rocksdb::ColumnFamilyOptions(), storage_config.meta_column_family(), &meta_cf_handle);
+                
+                if (!create_cf_status.ok()) {
+                    DBG("Failed to create meta CF: " + create_cf_status.ToString());
+                    // Clean up
+                    for (auto h : handles) delete h;
+                    delete db;
+                    db = nullptr;
+                    return StorageError("Failed to create meta column family");
+                }
+                
+                handles.push_back(meta_cf_handle);
+            } else if (!open_status.ok()) {
+                DBG("Open failed: " + open_status.message());
+                return open_status;
             }
-            DBG("Storage::Open() Meta cf is there!");
-
+            
             metaHandle = nullptr;
             for (auto const& handle : handles) {
                 column_families_handles_map[handle->GetName()] = handle;
-            }
-            auto meta_handle_iter = column_families_handles_map.find(storage_config.meta_column_family());
-            if (meta_handle_iter != column_families_handles_map.end()) {
-                metaHandle = meta_handle_iter->second;
-            } else {
-                return StorageError("Cannot find meta column family");
+                if (handle->GetName() == storage_config.meta_column_family()) {
+                    metaHandle = handle;
+                }
             }
 
-            std::cout << "STORAGE OK!\n";
+            if (metaHandle == nullptr) {
+                return StorageError("Meta column family not found after opening");
+            }
+
+            std::cout << "STORAGE OK! (" << column_families_handles_map.size() << " column families)\n";
             return Status();
         }
 
-        // Create table
         virtual Status CreateTable(google::bigtable::admin::v2::Table& schema) {
-            //rocksdb::Transaction* txn = db->BeginTransaction(woptions);
             auto txn = StartRocksTransaction();
-            google::bigtable::admin::v2::Table* xschema = new google::bigtable::admin::v2::Table();
-            *xschema = schema;
 
             auto key = rocksdb::Slice(schema.name());
             if(KeyExists(txn, metaHandle, key)) {
-                // Table exists
-                DBG("Storage::CreateTable() TABLE EXISTS");
                 return AlreadyExistsError("Table already exists.", GCP_ERROR_INFO().WithMetadata(
                     "table_name", schema.name()));
             }
 
             storage::TableMeta meta;
-            //meta.set_allocated_table(xschema);
-            meta.set_allocated_table(&schema);
+            *meta.mutable_table() = schema;
+            
+            std::vector<std::string> missing_cfs;
+            for(auto& cf : meta.table().column_families()) {
+                auto iter = column_families_handles_map.find(cf.first);
+                if (iter == column_families_handles_map.end()) {
+                    missing_cfs.push_back(cf.first);
+                }
+            }
+            
+            if (!missing_cfs.empty()) {
+                txn->Rollback();
+                delete txn;
+                
+                // Close current database
+                for (auto& pair : column_families_handles_map) {
+                    delete pair.second;
+                }
+                column_families_handles_map.clear();
+                delete db;
+                db = nullptr;
+                
+                // Open regular RocksDB (not TransactionDB) to add column families
+                rocksdb::DB* regular_db;
+                std::vector<rocksdb::ColumnFamilyDescriptor> existing_cfs;
+                std::vector<std::string> cf_names;
+                auto list_status = rocksdb::DB::ListColumnFamilies(options, storage_config.db_path(), &cf_names);
+                if (!list_status.ok()) {
+                    return StorageError("Failed to list CFs during CF addition");
+                }
+                
+                std::vector<CFHandle> cf_handles;
+                for (auto const& name : cf_names) {
+                    existing_cfs.push_back(rocksdb::ColumnFamilyDescriptor(name, rocksdb::ColumnFamilyOptions()));
+                }
+                
+                auto db_status = rocksdb::DB::Open(options, storage_config.db_path(), existing_cfs, &cf_handles, &regular_db);
+                if (!db_status.ok()) {
+                    return StorageError("Failed to open regular DB for CF addition: " + db_status.ToString());
+                }
+                
+                for (auto const& cf_name : missing_cfs) {
+                    CFHandle new_handle;
+                    auto create_status = regular_db->CreateColumnFamily(rocksdb::ColumnFamilyOptions(), cf_name, &new_handle);
+                    if (!create_status.ok()) {
+                        for (auto h : cf_handles) delete h;
+                        delete regular_db;
+                        return StorageError("Failed to create column family " + cf_name + ": " + create_status.ToString());
+                    }
+                    cf_handles.push_back(new_handle);
+                }
+                
+                for (auto h : cf_handles) delete h;
+                delete regular_db;
+                
+                auto reopen_status = Open();
+                if (!reopen_status.ok()) {
+                    return reopen_status;
+                }
+                
+                txn = StartRocksTransaction();
+            }
+            
             auto status = GetStatus(txn->Put(metaHandle, key, rocksdb::Slice(SerializeTableMeta(meta))), "Put table key to metadata cf");
             
-            // Commit now
             status = Commit(txn);
             if (!status.ok()) {
                 return status;
             }
 
-            // Make sure column families exist
-            DBG("Storage::CreateTable() Create all column families");
-            for(auto& cf : meta.table().column_families()) {
-                auto iter = column_families_handles_map.find(cf.first);
-                if (iter == column_families_handles_map.end()) {
-                    // Column family from table does not exist
-                    CFHandle handle;
-                    DBG("Create table cf = ");
-                    DBG(cf.first);
-                    status = GetStatus(db->CreateColumnFamily(rocksdb::ColumnFamilyOptions(), cf.first, &handle), "Create table column family");
-                    if (!status.ok()) {
-                        return status;
-                    }
-                    // Dummy row
-                    status = GetStatus(db->Put(woptions, handle, rocksdb::Slice("_"), rocksdb::Slice(SerializeRow(storage::RowData()))), "Put dummy row");
-                    if (!status.ok()) {
-                        return status;
-                    }
-                    column_families_handles_map[cf.first] = handle;
-                } else {
-                    DBG("Storage::CreateTable() Table cf already exists");
-                    DBG(cf.first);
+            // User needs to restart emulator with pre-created column families
+            if (!missing_cfs.empty()) {
+                std::string missing_list;
+                for (auto const& cf : missing_cfs) {
+                    if (!missing_list.empty()) missing_list += ", ";
+                    missing_list += cf;
                 }
+                return InvalidArgumentError(
+                    "Column families do not exist. Please restart the emulator to create them.",
+                    GCP_ERROR_INFO()
+                        .WithMetadata("missing_column_families", missing_list)
+                        .WithMetadata("table_name", schema.name()));
             }
-            meta.release_table();
+            
+            // TODO: Implement garbage collection for old cell versions based on gc_rule
             return Status();
-            //return Commit(txn);
-            //return Commit(txn);
         }
 
         // Delete table
@@ -781,9 +850,7 @@ inline RocksDBStorageRowTX::RocksDBStorageRowTX(
     std::string const& row_key,
     rocksdb::Transaction* txn,
     RocksDBStorage* db
-): row_key_(row_key), txn_(txn), roptions_(), db_(db), data_() {
-    // TODO: Nothing happens here, lol
-}
+): row_key_(row_key), txn_(txn), roptions_(), db_(db), data_() {}
 
 inline Status RocksDBStorageRowTX::DeleteRowFromColumnFamily(
     std::string const& column_family
@@ -794,33 +861,24 @@ inline Status RocksDBStorageRowTX::DeleteRowFromColumnFamily(
 }
 
 inline Status RocksDBStorageRowTX::Commit() {
-    // Commit all column families rows
-    DBG("RocksDBStorageRowTX::Commit()");
     for (auto const& row_entry : data_) {
         auto cf = db_->column_families_handles_map[row_entry.first];
-        DBG("RocksDBStorageRowTX::Commit() Serialize row");
         auto out = db_->SerializeRow(row_entry.second);
-        DBG("RocksDBStorageRowTX::Commit() Put");
         auto status = db_->GetStatus(txn_->Put(cf, rocksdb::Slice(row_key_), rocksdb::Slice(std::move(out))), "Update commit row");
         if (!status.ok()) {
-            DBG("RocksDBStorageRowTX::Commit() Put caused rollback");
             return Rollback(status);
         }
     }
-    DBG("RocksDBStorageRowTX::Commit() Commit");
     const auto status = txn_->Commit();
     assert(status.ok());
-    DBG("RocksDBStorageRowTX::Commit() Delete txn");
     delete txn_;
     txn_ = nullptr;
-    DBG("RocksDBStorageRowTX::Commit() Exit");
     return Status();
 }
 
 inline Status RocksDBStorageRowTX::LoadRow(std::string const& column_family) {
     if(data_.find(column_family) == data_.end()) {
         auto cf = db_->column_families_handles_map[column_family];
-        DBG("SETCELL: Found column family");
         std::string out;
         // Get won't fail if there's no row
         auto get_status = db_->GetStatus(txn_->Get(roptions_, cf, rocksdb::Slice(row_key_), &out), "Load commit row", Status());
@@ -859,6 +917,122 @@ inline Status RocksDBStorageRowTX::SetCell(
     return Status();
 }
 
+inline StatusOr<absl::optional<std::string>> RocksDBStorageRowTX::UpdateCell(
+    std::string const& column_family,
+    std::string const& column_qualifier,
+    std::chrono::milliseconds timestamp,
+    std::string& value,
+    std::function<StatusOr<std::string>(std::string const&, std::string&&)> const& update_fn
+) {
+    DBG("UpdateCell()");
+    auto status = LoadRow(column_family);
+    if (!status.ok()) {
+        return status;
+    }
+
+    auto& row_data = data_[column_family];
+    auto columns_map = row_data.mutable_columns();
+    auto column_it = columns_map->find(column_qualifier);
+    
+    absl::optional<std::string> old_value = absl::nullopt;
+    
+    if (column_it != columns_map->end()) {
+        auto& cells = (*column_it->second.mutable_cells());
+        auto cell_it = cells.find(timestamp.count());
+        if (cell_it != cells.end()) {
+            old_value = cell_it->second;
+        }
+    }
+
+    auto maybe_new_value = update_fn(column_qualifier, std::move(value));
+    if (!maybe_new_value.ok()) {
+        return maybe_new_value.status();
+    }
+
+    RowDataEnsure(row_data, column_qualifier, timestamp, maybe_new_value.value());
+    DBG("UpdateCell: Exit");
+    return old_value;
+}
+
+inline Status RocksDBStorageRowTX::DeleteRowColumn(
+    std::string const& column_family,
+    std::string const& column_qualifier,
+    ::google::bigtable::v2::TimestampRange const& time_range
+) {
+    DBG("DeleteRowColumn()");
+    auto status = LoadRow(column_family);
+    if (!status.ok()) {
+        return status;
+    }
+
+    auto& row_data = data_[column_family];
+    auto columns_map = row_data.mutable_columns();
+    auto column_it = columns_map->find(column_qualifier);
+    
+    if (column_it == columns_map->end()) {
+        // Column doesn't exist, nothing to delete
+        return Status();
+    }
+
+    auto& cells = (*column_it->second.mutable_cells());
+    
+    // Determine time range bounds
+    int64_t start_micros = time_range.start_timestamp_micros();
+    absl::optional<int64_t> maybe_end_micros = 
+        time_range.end_timestamp_micros() == 0 ? absl::nullopt : absl::optional<int64_t>(time_range.end_timestamp_micros());
+    
+    auto start_millis = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::microseconds(start_micros)).count();
+    
+    // Delete cells in the time range
+    for (auto cell_it = cells.begin(); cell_it != cells.end(); ) {
+        int64_t cell_timestamp = cell_it->first;
+        
+        // Check if in range: [start, end) - timestamps are decreasing order in BT
+        bool in_range = cell_timestamp >= start_millis;
+        if (maybe_end_micros.has_value()) {
+            auto end_millis = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::microseconds(*maybe_end_micros)).count();
+            in_range = in_range && cell_timestamp < end_millis;
+        }
+        
+        if (in_range) {
+            cell_it = cells.erase(cell_it);
+        } else {
+            ++cell_it;
+        }
+    }
+    
+    // If column is now empty, remove it
+    if (cells.empty()) {
+        columns_map->erase(column_it);
+    }
+    
+    DBG("DeleteRowColumn: Exit");
+    return Status();
+}
+
+inline Status RocksDBStorageRowTX::DeleteRowFromAllColumnFamilies() {
+    DBG("DeleteRowFromAllColumnFamilies()");
+    
+    // Get all column families from the table
+    // We need to iterate through all column families and delete this row from each
+    for (auto const& cf_entry : db_->column_families_handles_map) {
+        if (cf_entry.first == db_->storage_config.meta_column_family()) {
+            // Skip metadata column family
+            continue;
+        }
+        
+        auto status = DeleteRowFromColumnFamily(cf_entry.first);
+        if (!status.ok()) {
+            return status;
+        }
+    }
+    
+    DBG("DeleteRowFromAllColumnFamilies: Exit");
+    return Status();
+}
+
 inline RocksDBColumnFamilyStream::RocksDBColumnFamilyStream(
     std::string const& column_family_name,
     rocksdb::ColumnFamilyHandle* handle,
@@ -870,9 +1044,7 @@ inline RocksDBColumnFamilyStream::RocksDBColumnFamilyStream(
     row_ranges_(std::move(row_set)),
     column_ranges_(StringRangeSet::All()),
     timestamp_ranges_(TimestampRangeSet::All()),
-    db_(db), initialized_(false), row_iter_(nullptr) {
-        // TODO: Nothing happens here, lol
-    }
+    db_(db), initialized_(false), row_iter_(nullptr) {}
 
 
 inline bool RocksDBColumnFamilyStream::HasValue() const {

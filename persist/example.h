@@ -34,7 +34,7 @@ namespace cloud {
 namespace bigtable {
 namespace emulator {
 
-StatusOr<std::shared_ptr<Table>> CreateTable(
+static inline StatusOr<std::shared_ptr<Table>> CreateTable(
     std::string const& table_name, std::vector<std::string>& column_families) {
   ::google::bigtable::admin::v2::Table schema;
   schema.set_name(table_name);
@@ -69,10 +69,6 @@ static inline void ExampleClusterCode(std::shared_ptr<Cluster> cluster, std::sha
       DBG(maybe_table.status().message());
       return;
     }
-
-    // TODO: Remove
-    //storage.Close();
-    //storage->ExampleFun();
 
     ::google::bigtable::admin::v2::Table_View view = ::google::bigtable::admin::v2::Table_View_FULL;
     auto maybe_tables = cluster->ListTables("projects/test/instances/test", view);

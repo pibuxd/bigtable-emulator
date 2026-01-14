@@ -18,9 +18,6 @@ load(":bigtable_emulator_test_common.bzl", "bigtable_emulator_test_common_hdrs",
 load(":bigtable_emulator_unit_tests.bzl", "bigtable_emulator_unit_tests")
 load(":funcs.bzl", "gen_cc_tests")
 
-load("@rules_cc//cc:repositories.bzl", "rules_cc_dependencies")
-rules_cc_dependencies()
-
 proto_library(
     name = "storage_protos",
     srcs = [

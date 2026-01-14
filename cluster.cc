@@ -95,11 +95,6 @@ StatusOr<btadmin::Table> ApplyView(std::string const& table_name,
 StatusOr<btadmin::Table> Cluster::CreateTable(std::string const& table_name,
                                               btadmin::Table schema) {
   schema.set_name(table_name);
-  std::cout << "Creating table " << table_name << std::endl;
-  // auto maybe_table = Table::Create(std::move(schema));
-  // if (!maybe_table) {
-  //   return maybe_table.status();
-  // }
   auto status = storage_->CreateTable(schema);
   if (!status.ok()) {
     return status;
@@ -107,8 +102,6 @@ StatusOr<btadmin::Table> Cluster::CreateTable(std::string const& table_name,
     return schema;
   }
 
-
-  // std::cout << "PARRTTEND!\n";std::cout.flush();
   // {
   //   std::lock_guard<std::mutex> lock(mu_);
   //   if (!table_by_name_.emplace(table_name, *maybe_table).second) {
@@ -123,15 +116,9 @@ StatusOr<btadmin::Table> Cluster::CreateTable(std::string const& table_name,
 StatusOr<std::vector<btadmin::Table>> Cluster::ListTables(
     std::string const& instance_name, btadmin::Table_View view) const {
   std::map<std::string, std::shared_ptr<Table>> table_by_name_copy;
-  // {
-  //   std::lock_guard<std::mutex> lock(mu_);
-  //   table_by_name_copy = table_by_name_;
-  // }
   std::vector<btadmin::Table> res;
   std::string const prefix = instance_name + "/tables/";
-  std::cout << "Listing tables with prefix " << prefix << std::endl;
 
-  // NEW CODE
   storage_->ForEachTable([&res, &view](auto const& name, auto const& meta) -> Status {
     auto maybe_view =
         ApplyView(name, meta.table(), view, btadmin::Table::NAME_ONLY);
@@ -142,21 +129,6 @@ StatusOr<std::vector<btadmin::Table>> Cluster::ListTables(
     return Status();
   }, prefix);
   return res;
-
-  // TODO: Remove this old code:
-  // for (auto name_and_table_it = table_by_name_copy.upper_bound(prefix);
-  //      name_and_table_it != table_by_name_copy.end() &&
-  //      absl::StartsWith(name_and_table_it->first, prefix);
-  //      ++name_and_table_it) {
-  //   auto maybe_view =
-  //       ApplyView(name_and_table_it->first, *name_and_table_it->second, view,
-  //                 btadmin::Table::NAME_ONLY);
-  //   if (!maybe_view) {
-  //     return maybe_view.status();
-  //   }
-  //   res.emplace_back(*maybe_view);
-  // }
-  // return res;
 }
 
 StatusOr<btadmin::Table> Cluster::GetTable(std::string const& table_name,
