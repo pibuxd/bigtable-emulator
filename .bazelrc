@@ -133,3 +133,6 @@ build:msan --linkopt=-L/usr/lib/x86_64-unknown-linux-gnu
 
 # --config otel2: Open Telemetery ABI version 2
 # build:otel2 --cxxopt=-DOPENTELEMETRY_ABI_VERSION_NO=2
+
+# Generate compile_commands.json for tools that require it.
+run:compile-commands --experimental_convenience_symlinks=normal @hedron_compile_commands//:refresh_all
