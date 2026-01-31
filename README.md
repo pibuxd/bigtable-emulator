@@ -124,6 +124,12 @@ cbt read my-table  # data is still there
 
 Example in `server.cc` and `persist/storage.h`
 
+## `compile_commands.json`
+
+If you need to generate `compile_commands.json` for your tooling, run:
+```shell
+bazel run --config=compile-commands
+```
 
 ## Contributing changes
 
