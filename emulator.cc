@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "server.h"
 #include "absl/flags/flag.h"
 #include "absl/flags/parse.h"
 #include "absl/flags/usage.h"
 #include "absl/strings/str_cat.h"
+#include "server.h"
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
@@ -26,6 +26,8 @@ ABSL_FLAG(std::string, host, "localhost",
           "the address to bind to on the local machine");
 ABSL_FLAG(std::uint16_t, port, 8888,
           "the port to bind to on the local machine");
+ABSL_FLAG(std::string, storage_path, "/tmp/bt-rocksdb-data",
+          "Persistent storage RocksDB path");
 
 int main(int argc, char* argv[]) {
   absl::SetProgramUsageMessage(

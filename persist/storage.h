@@ -19,8 +19,12 @@
 #include "google/cloud/internal/make_status.h"
 #include <google/bigtable/admin/v2/table.pb.h>
 #include <google/bigtable/v2/data.pb.h>
+#include "absl/flags/declare.h"
+#include "absl/flags/flag.h"
 
 #define DBG(TEXT) if(true){ std::cout << (TEXT) << "\n"; std::cout.flush(); }
+
+ABSL_DECLARE_FLAG(std::string, storage_path);
 
 
 namespace google {
@@ -360,8 +364,7 @@ class RocksDBStorage : public Storage {
 
         RocksDBStorage() {
             storage_config = storage::StorageRocksDBConfig();
-            // TODO: Make DB path configurable via environment variable or config file
-            storage_config.set_db_path("/tmp/rocksdb-for-bigtable-test4");
+            storage_config.set_db_path(absl::GetFlag(FLAGS_storage_path));
             storage_config.set_meta_column_family("bte_metadata");
         }
         
