@@ -725,10 +725,10 @@ class Table2 {
       storage::TableMeta new_meta;
       *new_meta.mutable_table() = updated_schema;
       
-      // We need to update the metadata, but RocksDB storage doesn't expose
-      // a direct update method. For now, we'll rely on the fact that
-      // the schema is loaded on demand.
-      // TODO: Implement atomic schema updates with storage sync
+      auto status = storage_->UpdateTableMetadata(name_, new_meta);
+      if (!status.ok()) {
+        return status;
+      }
       
       return Status();
     }
