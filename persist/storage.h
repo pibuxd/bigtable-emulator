@@ -109,28 +109,20 @@ class Storage {
         virtual ~Storage() = default;
         virtual Status Close() = 0;
 
-        // Start transaction
         virtual std::unique_ptr<StorageRowTX> RowTransaction(std::string const& row_key) = 0;
 
-        // Initialize storage
         virtual Status Open(std::vector<std::string> additional_cf_names = {}) = 0;
 
-        // Create table
         virtual Status CreateTable(google::bigtable::admin::v2::Table& schema) = 0;
 
-        // Delete table
         virtual Status DeleteTable(std::string table_name, std::function<Status(std::string, storage::TableMeta)>&& precondition_fn) const = 0;
-
-        // Get table
         virtual StatusOr<storage::TableMeta> GetTable(std::string table_name) const = 0;
-
-        // Has table
+        virtual Status UpdateTableMetadata(std::string table_name, storage::TableMeta const& meta) = 0;
+        virtual Status EnsureColumnFamiliesExist(std::vector<std::string> const& cf_names) = 0;
         virtual bool HasTable(std::string table_name) const = 0;
 
-        // Iterate tables
         virtual Status ForEachTable(std::function<Status(std::string, storage::TableMeta)>&& fn) const = 0;
 
-        // Iterate tables with prefix
         virtual Status ForEachTable(std::function<Status(std::string, storage::TableMeta)>&& fn, const std::string& prefix) const = 0;
 };
 
@@ -651,6 +643,79 @@ class RocksDBStorage : public Storage {
             return DeserializeTableMeta(std::move(out));
         }
 
+        virtual Status UpdateTableMetadata(std::string table_name, storage::TableMeta const& meta) {
+            auto txn = StartRocksTransaction();
+            auto key = rocksdb::Slice(table_name);
+            auto serialized = SerializeTableMeta(meta);
+            
+            auto status = GetStatus(
+                txn->Put(metaHandle, key, rocksdb::Slice(serialized)),
+                "Update table metadata");
+            
+            if (!status.ok()) {
+                txn->Rollback();
+                delete txn;
+                return status;
+            }
+            
+            return Commit(txn);
+        }
+
+        virtual Status EnsureColumnFamiliesExist(std::vector<std::string> const& cf_names) {
+            std::vector<std::string> missing_cfs;
+            for (auto const& cf_name : cf_names) {
+                auto iter = column_families_handles_map.find(cf_name);
+                if (iter == column_families_handles_map.end()) {
+                    missing_cfs.push_back(cf_name);
+                }
+            }
+            
+            if (missing_cfs.empty()) {
+                return Status();
+            }
+            
+            for (auto& pair : column_families_handles_map) {
+                delete pair.second;
+            }
+            column_families_handles_map.clear();
+            delete db;
+            db = nullptr;
+            
+            rocksdb::DB* regular_db;
+            std::vector<rocksdb::ColumnFamilyDescriptor> existing_cfs;
+            std::vector<std::string> existing_cf_names;
+            auto list_status = rocksdb::DB::ListColumnFamilies(options, storage_config.db_path(), &existing_cf_names);
+            if (!list_status.ok()) {
+                return StorageError("Failed to list CFs during CF addition");
+            }
+            
+            std::vector<CFHandle> cf_handles;
+            for (auto const& name : existing_cf_names) {
+                existing_cfs.push_back(rocksdb::ColumnFamilyDescriptor(name, rocksdb::ColumnFamilyOptions()));
+            }
+            
+            auto db_status = rocksdb::DB::Open(options, storage_config.db_path(), existing_cfs, &cf_handles, &regular_db);
+            if (!db_status.ok()) {
+                return StorageError("Failed to open regular DB for CF addition: " + db_status.ToString());
+            }
+            
+            for (auto const& cf_name : missing_cfs) {
+                CFHandle new_handle;
+                auto create_status = regular_db->CreateColumnFamily(rocksdb::ColumnFamilyOptions(), cf_name, &new_handle);
+                if (!create_status.ok()) {
+                    for (auto h : cf_handles) delete h;
+                    delete regular_db;
+                    return StorageError("Failed to create column family " + cf_name + ": " + create_status.ToString());
+                }
+                cf_handles.push_back(new_handle);
+            }
+            
+            for (auto h : cf_handles) delete h;
+            delete regular_db;
+            
+            return Open();
+        }
+
         // Iterate tables
         virtual Status ForEachTable(std::function<Status(std::string, storage::TableMeta)>&& fn) const {
             rocksdb::Iterator* iter = db->NewIterator(roptions, metaHandle);
@@ -706,6 +771,9 @@ class RocksDBStorage : public Storage {
             auto const& m = table.value().table().column_families();
             for (auto const& it : m) {
                 const auto x = column_families_handles_map[it.first];
+                if (x == nullptr) {
+                    continue;
+                }
                 std::unique_ptr<AbstractFamilyColumnStreamImpl> c = std::make_unique<RocksDBColumnFamilyStream>(it.first, x, range_set, this);
                 iters.push_back(std::move(c));
             }
@@ -1065,37 +1133,73 @@ inline CellView const& RocksDBColumnFamilyStream::Value() const {
 }
 
 inline void RocksDBColumnFamilyStream::NextRow() const {
-    DBG("RocksDBColumnFamilyStream::NextRow()");
     if (!initialized_) {
-        // Setup is required
-        DBG("RocksDBColumnFamilyStream::NextRow() SeekToFirst()");
-        row_iter_->SeekToFirst();
-    }
-     if (!row_iter_->Valid()) {
-        DBG("RocksDBColumnFamilyStream::NextRow() NOT VALID ITERATOR");
-        row_data_ = absl::nullopt;
-     } else {
-        DBG("RocksDBColumnFamilyStream::NextRow() Deserialize");
-        DBG(row_iter_->key().ToString());
-        auto maybe_row = db_->DeserializeRow(row_iter_->value().ToString());
-        if (!maybe_row.ok()) {
-            return;
-        }
-        DBG("RocksDBColumnFamilyStream::NextRow() Remap");
-        auto data = TColumnFamilyRow();
-        for (auto const& i : maybe_row.value().columns()) {
-            for (auto const& j : i.second.cells()) {
-                data[i.first][std::chrono::milliseconds(j.first)] = j.second;
+        // Seek to the start of the first row range
+        auto const& ranges = row_ranges_->disjoint_ranges();
+        if (!ranges.empty()) {
+            auto const& first_range = *ranges.begin();
+            if (absl::holds_alternative<std::string>(first_range.start())) {
+                row_iter_->Seek(absl::get<std::string>(first_range.start()));
+            } else {
+                row_iter_->SeekToFirst();
             }
+        } else {
+            row_iter_->SeekToFirst();
         }
-        DBG("RocksDBColumnFamilyStream::NextRow() Set row data");
-        row_data_ = std::move(data);
-
-        //row_data_ = std::move(maybe_row.value());
-        DBG("RocksDBColumnFamilyStream::NextRow() Row iter next!");
-        row_key_ = row_iter_->key().ToString();
+    } else {
         row_iter_->Next();
     }
+    
+    // Skip rows until we find one in our range
+    while (row_iter_->Valid()) {
+        std::string key = row_iter_->key().ToString();
+        
+        // Check if key is in any of our ranges
+        bool in_range = false;
+        for (auto const& range : row_ranges_->disjoint_ranges()) {
+            if (range.IsWithin(key)) {
+                in_range = true;
+                break;
+            }
+        }
+        
+        if (in_range) {
+            // Found a valid row in range
+            auto maybe_row = db_->DeserializeRow(row_iter_->value().ToString());
+            if (!maybe_row.ok()) {
+                row_data_ = absl::nullopt;
+                return;
+            }
+            auto data = TColumnFamilyRow();
+            for (auto const& i : maybe_row.value().columns()) {
+                for (auto const& j : i.second.cells()) {
+                    data[i.first][std::chrono::milliseconds(j.first)] = j.second;
+                }
+            }
+            row_data_ = std::move(data);
+            row_key_ = key;
+            return;
+        }
+        
+        // Key not in range, check if we've passed all ranges
+        bool past_all_ranges = true;
+        for (auto const& range : row_ranges_->disjoint_ranges()) {
+            if (!range.IsAboveEnd(key)) {
+                past_all_ranges = false;
+                break;
+            }
+        }
+        
+        if (past_all_ranges) {
+            // We've passed all ranges, stop searching
+            break;
+        }
+        
+        row_iter_->Next();
+    }
+    
+    // No valid row found
+    row_data_ = absl::nullopt;
 }
 
 inline bool RocksDBColumnFamilyStream::Next(NextMode mode) {
@@ -1124,17 +1228,13 @@ inline bool RocksDBColumnFamilyStream::Next(NextMode mode) {
 
 inline void RocksDBColumnFamilyStream::InitializeIfNeeded() const {
   if (!initialized_) {
-    DBG("InitializeIfNeeded Create NewIterator()");
-    DBG(column_family_name_);
     rocksdb::ColumnFamilyHandle* cf = nullptr;
     for (auto const& i : db_->column_families_handles_map) {
         if(i.first == column_family_name_) {
             cf = i.second;
         }
     }
-    // db_->column_families_handles_map[column_family_name_]
     row_iter_ = db_->db->NewIterator(db_->roptions, cf);
-    DBG("NewIterator() created");
     row_data_ = absl::nullopt;
     NextRow();
     initialized_ = true;

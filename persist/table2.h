@@ -744,6 +744,9 @@ class Table2 {
 
       auto new_schema = maybe_meta.value().table();
 
+      // Track new column families that need to be created
+      std::vector<std::string> new_cf_names;
+
       for (auto const& modification : request.modifications()) {
         if (modification.drop()) {
           // Check deletion protection
@@ -810,7 +813,7 @@ class Table2 {
                 GCP_ERROR_INFO().WithMetadata("modification", modification.DebugString()));
           }
 
-          // TODO: This now works via CreateTable reopen mechanism, consider optimization
+          new_cf_names.push_back(modification.id());
           
         } else {
           return UnimplementedError(
@@ -819,7 +822,20 @@ class Table2 {
         }
       }
 
-      // TODO: Persist ModifyColumnFamilies changes to metadata CF
+      if (!new_cf_names.empty()) {
+        auto ensure_status = storage_->EnsureColumnFamiliesExist(new_cf_names);
+        if (!ensure_status.ok()) {
+          return ensure_status;
+        }
+      }
+
+      storage::TableMeta updated_meta;
+      *updated_meta.mutable_table() = new_schema;
+      
+      auto status = storage_->UpdateTableMetadata(name_, updated_meta);
+      if (!status.ok()) {
+        return status;
+      }
       
       return new_schema;
     }
