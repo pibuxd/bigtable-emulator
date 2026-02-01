@@ -124,6 +124,8 @@ class Storage {
         virtual Status ForEachTable(std::function<Status(std::string, storage::TableMeta)>&& fn) const = 0;
 
         virtual Status ForEachTable(std::function<Status(std::string, storage::TableMeta)>&& fn, const std::string& prefix) const = 0;
+
+        virtual Status DeleteColumnFamily(std::string const& cf_name) = 0;
 };
 
 class RocksDBStorage;
@@ -752,6 +754,31 @@ class RocksDBStorage : public Storage {
             }
             assert(iter->status().ok());
             delete iter;
+            return Status();
+        }
+
+        virtual Status DeleteColumnFamily(std::string const& cf_name) override {
+            auto it = column_families_handles_map.find(cf_name);
+            if (it == column_families_handles_map.end()) {
+                return Status(); // Already deleted or doesn't exist
+            }
+            auto* handle = it->second;
+
+            // Drop from RocksDB (records drop in MANIFEST)
+            auto status = db->DropColumnFamily(handle);
+            if (!status.ok()) {
+                return GetStatus(status, "DropColumnFamily");
+            }
+
+            // Destroy the handle to free memory
+            status = db->DestroyColumnFamilyHandle(handle);
+            if (!status.ok()) {
+                return GetStatus(status, "DestroyColumnFamilyHandle");
+            }
+
+            // Remove from internal map so Destructor doesn't double-free
+            column_families_handles_map.erase(it);
+            
             return Status();
         }
 

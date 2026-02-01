@@ -763,7 +763,11 @@ class Table2 {
                 GCP_ERROR_INFO().WithMetadata("modification", modification.DebugString()));
           }
 
-          // TODO: Implement RocksDB column family deletion (requires DB restart)
+          // Delete the column family from RocksDB
+          auto drop_status = storage_->DeleteColumnFamily(modification.id());
+          if (!drop_status.ok()) {
+              return drop_status;
+          }
           
         } else if (modification.has_update()) {
           auto& cfs = *new_schema.mutable_column_families();
