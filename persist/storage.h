@@ -352,31 +352,26 @@ class StorageFitleredTableStream : public MergeCellStreams {
 class RocksDBStorage : public Storage {
     friend class RocksDBStorageRowTX;
     friend class RocksDBColumnFamilyStream;
+    private:
+        inline rocksdb::Iterator* createTablesIterator() const {
+            return db->NewIterator(roptions, metaHandle);
+        }
     public:
         // This isn't that useful. Maybe you can find better name for it?
         using CFHandle = rocksdb::ColumnFamilyHandle*;
 
-        RocksDBStorage() {
+        explicit RocksDBStorage(const storage::StorageRocksDBConfig& arg_storage_config) {
+            storage_config = arg_storage_config;
+        }
+        
+        explicit RocksDBStorage() {
             storage_config = storage::StorageRocksDBConfig();
             storage_config.set_db_path(absl::GetFlag(FLAGS_storage_path));
             storage_config.set_meta_column_family("bte_metadata");
         }
         
         virtual ~RocksDBStorage() {
-            if (db != nullptr) {
-                for (auto& pair : column_families_handles_map) {
-                    delete pair.second;
-                }
-                column_families_handles_map.clear();
-                delete db;
-                db = nullptr;
-            }
-        }
-
-        void ExampleFun() {
-            auto r = rocksdb::ReadOptions();
-            auto cf = column_families_handles_map["test_column_family"];
-            rocksdb::Iterator* iter = db->NewIterator(r, cf);
+            Close();
         }
 
         // Start transaction
@@ -385,13 +380,39 @@ class RocksDBStorage : public Storage {
         }
 
         virtual Status Close() {
-            auto status = GetStatus(db->WaitForCompact(rocksdb::WaitForCompactOptions()), "Close DB");
+
+            if (db == nullptr) {
+                return Status();
+            }
+
+            DBG("Close: Kill meta handle");
+            for (auto& pair : column_families_handles_map) {
+                delete pair.second;
+            }
+            column_families_handles_map.clear();
+
+            rocksdb::WaitForCompactOptions opts;
+            opts.close_db = true;
+            //opts.flush = true;
+            //opts.wait_for_purge = true;
+            DBG("Close: Wait for compact");
+            auto status = GetStatus(db->WaitForCompact(opts), "Wait for compact");
             if (!status.ok()) {
+                DBG(status.message());
                 return status;
             }
-            delete db;
+            DBG("Close: Close DB");
+            // status = GetStatus(db->Close(), "Close DB");
+            // if (!status.ok()) {
+            //     return status;
+            // }
+            DBG("Close: Delete DB");
+            //delete db;
+            db = nullptr;
+            DBG("Close: Deleted DB");
             metaHandle = nullptr;
             db = nullptr;
+            DBG("Close: Exit");
             return Status();
         }
 
@@ -718,6 +739,169 @@ class RocksDBStorage : public Storage {
             return Open();
         }
 
+        //class TablesMetadataIteratorSentinel {};
+
+        template<bool with_prefix, typename T>
+        class TablesMetadataView;
+
+        template<bool with_prefix>
+        class TablesMetadataIterator {
+        public:
+            using iterator_category = std::forward_iterator_tag;
+            using value_type = std::tuple<std::string, storage::TableMeta>;
+            using difference_type = std::ptrdiff_t;
+            using pointer = value_type;
+            using reference = value_type;
+        private:
+            template<bool p_with_prefix, typename T> friend class TablesMetadataView;
+
+            rocksdb::Iterator* iter;
+            absl::optional<value_type> loaded_table_data;
+            Status error;
+
+            std::conditional_t<with_prefix == true, std::string, std::monostate> prefix;
+
+            inline bool isValid() const {
+                // iter->key().starts_with(prefix)
+                if constexpr (with_prefix) {
+                    return iter != nullptr && error.ok() && iter->Valid() && iter->key().starts_with(prefix);
+                } else {
+                    return iter != nullptr && error.ok() && iter->Valid();
+                }
+            }
+
+            inline void loadTableData() {
+                if (!isValid() || loaded_table_data) {
+                    return;
+                }
+                auto meta = DeserializeTableMeta(iter->value().ToString());
+                if (!meta.ok()) {
+                    error = meta.status();
+                    return;
+                }
+                loaded_table_data = std::make_pair(iter->key().ToString(), meta.value());
+            }
+
+            template<
+                bool B = with_prefix,
+                typename std::enable_if<B, int>::type = 0
+            >
+            explicit TablesMetadataIterator(
+                rocksdb::Iterator*&& rocks_iterator,
+                const std::string& search_prefix
+            ): iter(std::move(rocks_iterator)), loaded_table_data(absl::nullopt), prefix(search_prefix) {
+                iter->Seek(rocksdb::Slice(prefix));
+                loadTableData();
+            };
+
+            template<
+                bool B = !with_prefix,
+                typename std::enable_if<B, int>::type = 0
+            >
+            explicit TablesMetadataIterator(
+                rocksdb::Iterator*&& rocks_iterator
+            ): iter(std::move(rocks_iterator)), loaded_table_data(absl::nullopt) {
+                iter->SeekToFirst();
+                loadTableData();
+            };
+
+            explicit TablesMetadataIterator(std::monostate _): iter(nullptr) {};
+
+        public:
+            ~TablesMetadataIterator() {
+                if (iter != nullptr) {
+                    delete iter;
+                }
+            }
+
+            reference operator*() const { return loaded_table_data.value(); }
+            pointer operator->() { return loaded_table_data.value(); }
+        
+            // Prefix increment
+            TablesMetadataIterator& operator++() { 
+                if (!isValid()) {
+
+                    return *this;
+                }
+                iter->Next();
+                loadTableData();
+                return *this;
+            }  
+        
+            // Postfix increment
+            TablesMetadataIterator operator++(int) { TablesMetadataIterator tmp = *this; ++(*this); return tmp; }
+        
+            friend bool operator== (const TablesMetadataIterator& a, const TablesMetadataIterator& b) { return a.iter == b.iter || (!a.isValid() && !b.isValid()); };
+            friend bool operator!= (const TablesMetadataIterator& a, const TablesMetadataIterator& b) { return a.iter != b.iter && (a.isValid() || b.isValid()); }; 
+            //friend bool operator== (const TablesMetadataIterator& a, const TablesMetadataIteratorSentinel& _) { return !a.isValid(); };
+            //friend bool operator!= (const TablesMetadataIterator& a, const TablesMetadataIteratorSentinel& _) { return a.isValid(); };     
+        
+            Status status() const {
+                return error;
+            }
+        };
+
+        template<bool with_prefix, typename T>
+        class TablesMetadataView {
+        private:
+            const std::conditional_t<with_prefix, std::string, std::monostate> prefix;
+            const T* storage;
+
+            template<
+                bool B = with_prefix,
+                typename std::enable_if<B, int>::type = 0
+            >
+            explicit TablesMetadataView(const T* storage_ptr, const std::string prefix): storage(storage_ptr), prefix(std::move(prefix)) {};
+
+            template<
+                bool B = !with_prefix,
+                typename std::enable_if<B, int>::type = 0
+            >
+            explicit TablesMetadataView(const T* storage_ptr): storage(storage_ptr) {};
+            
+            
+            friend T;
+        public:
+            template<
+                bool B = with_prefix,
+                typename std::enable_if<B, int>::type = 0
+            >
+            inline TablesMetadataIterator<true> begin() const {
+                return TablesMetadataIterator<true>(std::move(storage->createTablesIterator()), prefix);
+            }
+
+            template<
+                bool B = !with_prefix,
+                typename std::enable_if<B, int>::type = 0
+            >
+            inline TablesMetadataIterator<false> begin() const {
+                return TablesMetadataIterator<false>(std::move(storage->createTablesIterator()));
+            }
+
+            inline TablesMetadataIterator<with_prefix> end() const {
+                return TablesMetadataIterator<with_prefix>(std::monostate{});
+            }
+
+            inline std::vector<std::string> names() const {
+                std::vector<std::string> tmp;
+                DBG("TABLES LIST! :D");
+                std::transform(begin(), end(), std::back_inserter(tmp), [](auto el) -> auto {
+                    DBG("=> "+std::get<0>(el));
+                    return std::get<0>(el);
+                } );
+                DBG("END! :D");
+                return tmp;
+            }
+        };
+
+        inline TablesMetadataView<false, RocksDBStorage> tables() const {
+            return TablesMetadataView<false, RocksDBStorage>(this);
+        }
+
+        inline TablesMetadataView<true, RocksDBStorage> tables(const std::string& prefix) const {
+            return TablesMetadataView<true, RocksDBStorage>(this, prefix);
+        }
+
         // Iterate tables
         virtual Status ForEachTable(std::function<Status(std::string, storage::TableMeta)>&& fn) const {
             rocksdb::Iterator* iter = db->NewIterator(roptions, metaHandle);
@@ -839,7 +1023,7 @@ class RocksDBStorage : public Storage {
             return out;
         }
 
-        inline StatusOr<storage::TableMeta> DeserializeTableMeta(std::string&& data) const {
+        static inline StatusOr<storage::TableMeta> DeserializeTableMeta(std::string&& data) {
             storage::TableMeta meta;
             if (!meta.ParseFromString(data)) {
                 return StorageError("DeserializeTableMeta()");
@@ -909,7 +1093,7 @@ class RocksDBStorage : public Storage {
             return GetStatus(status, "Open database");
         }
 
-        inline Status StorageError(std::string&& operation) const {
+        static inline Status StorageError(std::string&& operation) {
             return InternalError("Storage error",
                         GCP_ERROR_INFO().WithMetadata(
                             "operation", operation));
