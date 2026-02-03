@@ -8,6 +8,7 @@
 #define GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_TABLE2_H
 
 #include "persist/storage.h"
+#include "persist/rocksdb/storage.h"
 #include "column_family.h"
 #include "limits.h"
 #include "filter.h"

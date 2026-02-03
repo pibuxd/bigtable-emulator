@@ -16,7 +16,7 @@
 #define GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_CLUSTER_H
 
 #include "persist/table2.h"
-#include "persist/storage.h"
+#include "persist/rocksdb/storage.h"
 #include "table.h"
 #include "google/cloud/status.h"
 #include "google/cloud/status_or.h"

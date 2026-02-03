@@ -42,6 +42,7 @@
 #include <utility>
 
 #include "persist/storage.h"
+#include "persist/rocksdb/storage.h"
 
 namespace google {
 namespace cloud {

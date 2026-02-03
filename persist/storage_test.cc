@@ -15,6 +15,7 @@
 #include "table.h"
 #include "column_family.h"
 #include "filter.h"
+#include "persist/rocksdb/storage.h"
 #include "range_set.h"
 #include "google/cloud/testing_util/chrono_literals.h"
 #include <gtest/gtest.h>
