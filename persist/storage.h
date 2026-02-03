@@ -65,6 +65,7 @@ class StorageRowTX {
         virtual Status Commit() = 0;
         virtual Status Rollback(Status s) = 0;
 
+        // Set specific cell value
         virtual Status SetCell(
             std::string const& column_family,
             std::string const& column_qualifier,
@@ -74,6 +75,7 @@ class StorageRowTX {
             return Status();
         }
 
+        // Update specific cell value with given functor and return old value
         virtual StatusOr<absl::optional<std::string>> UpdateCell(
             std::string const& column_family,
             std::string const& column_qualifier,
@@ -84,6 +86,7 @@ class StorageRowTX {
             return Status();
         }
         
+        // Delete cells for given time range (lower bound is inclusive and upper explusive i.e start <= timestamp < end)
         virtual Status DeleteRowColumn(
             std::string const& column_family,
             std::string const& column_qualifier,
@@ -92,6 +95,7 @@ class StorageRowTX {
             return Status();
         }
 
+        // Delete cells for given time range with explicit time range (lower bound is inclusive and upper explusive i.e start <= timestamp < end)
         Status DeleteRowColumn(
             std::string const& column_family,
             std::string const& column_qualifier,
@@ -104,25 +108,32 @@ class StorageRowTX {
             return this->DeleteRowColumn(column_family, column_qualifier, t_range);
         };
 
+        // Delete cells for given time range with single value 
+        // Removes values exactly between: start <= timestamp < start+1
+        // where start+1 is 1 millisecond after start time.
         Status DeleteRowColumn(
             std::string const& column_family,
             std::string const& column_qualifier,
             std::chrono::milliseconds& value
         ) {
+            std::chrono::milliseconds value_end = value;
+            ++value_end;
             return this->DeleteRowColumn(
                 column_family,
                 column_qualifier,
                 value,
-                value
+                value_end
             );
         };
         
+        // Delete row from given column family
         virtual Status DeleteRowFromColumnFamily(
             std::string const& column_family
         ) {
             return Status();
         }
 
+        // Delete row from all column families (this is potentially expensive operation as we need to iterate all column families)
         virtual Status DeleteRowFromAllColumnFamilies() {
             return Status();
         }
@@ -143,9 +154,13 @@ class Storage {
 
         virtual Status DeleteTable(std::string table_name, std::function<Status(std::string, storage::TableMeta)>&& precondition_fn) const = 0;
         virtual StatusOr<storage::TableMeta> GetTable(std::string table_name) const = 0;
+        // Can be used to alter schema of the table after using CreateTable()
         virtual Status UpdateTableMetadata(std::string table_name, storage::TableMeta const& meta) = 0;
+        // Create given column families if they don't exist
         virtual Status EnsureColumnFamiliesExist(std::vector<std::string> const& cf_names) = 0;
+        // Check if table exist
         virtual bool HasTable(std::string table_name) const = 0;
+        // Delete column family (depending on implementation this can be potentially expensive operation)
         virtual Status DeleteColumnFamily(std::string const& cf_name) = 0;
 };
 
@@ -211,23 +226,31 @@ class RocksDBStorageRowTX : public StorageRowTX {
         
         // This is loaded row data. We load it lazily
         // Mapping [column_family, column_qualifier] => storage::RowData
+        // This is our way to provide very simplistic ORM-like functionality for row transactions.
+        // Each time we for example update row we need to load it and alter.
+        // To achieve that temporary row data is stored in this lazy_row_data_ field.
+        // Please use lazyRowData* methods and do not access this directly.
         using row_data_key_t = std::tuple<std::string, std::string>;
         std::map<row_data_key_t, storage::RowData> lazy_row_data_;
 
+        // Delete column family
         inline void lazyRowDataRemoveColumnFamily(
             const std::string& column_family
         );
 
+        // Checks if we have given column in local transaction state
         inline bool hasLazyRowData(
             const std::string& column_family,
             const std::string& column_qualifier
         );
 
+        // Get row data for given column from local transaction state
         inline storage::RowData& lazyRowDataRef(
             const std::string& column_family,
             const std::string& column_qualifier
         );
 
+        // Delete column
         inline Status lazyRowDataDelete(
             const std::string& column_family,
             const std::string& column_qualifier
@@ -425,6 +448,7 @@ class RocksDBStorage : public Storage {
             Close();
         }
 
+        // Helper to generate storage key used for rocksDB keys
         static inline std::string storageKey(
             const std::string& table_name,
             const std::string& row_key,
@@ -433,6 +457,8 @@ class RocksDBStorage : public Storage {
             return absl::StrCat(table_name, "|", row_key, "|", column_qualifier);
         }
 
+        // helper to generate storage key used for rocksDB keys
+        // This key should iterate all columns for given row
         static inline std::string storageKeyPartial(
             const std::string& table_name,
             const std::string& row_key
@@ -440,8 +466,7 @@ class RocksDBStorage : public Storage {
             return absl::StrCat(table_name, "|", row_key);
         }
 
-        //row_iter_->Seek(absl::get<std::string>(firs
-
+        // Parse storage key into tuple
         inline std::tuple<std::string, std::string, std::string> RawDataParseRowKey(
             rocksdb::Iterator* iter
         ) {
@@ -462,7 +487,12 @@ class RocksDBStorage : public Storage {
             return std::make_tuple(std::string(result[0]), std::string(result[1]), std::string(result[2]));
         }
 
-        // Cannot do this!
+        /*
+            All RawData* methods implement lowest-level basic row storage operations.
+            This function takes iterator as parameter and seeks first row key that corresponds to the given table and some row_prefix.
+            Function shouldn't point past first occurence of the prefix, so no row is missed.
+            If necessary you can just do SeekFirst() i.e the function's contract is that it can iterate superset of prefix (including all keys everywhere), but not subset.
+        */
         inline void RawDataSeekPrefixed(
             rocksdb::Iterator* iter,
             const std::string& table_name,
@@ -471,6 +501,10 @@ class RocksDBStorage : public Storage {
             iter->Seek(rocksdb::Slice(storageKeyPartial(table_name, row_prefix)));
         }
 
+        /**
+            All RawData* methods implement lowest-level basic row storage operations.
+            Put some binary representation of row data (we don't know anything about it) into underlying RocksDB storage.
+         */
         inline Status RawDataPut(
             rocksdb::Transaction* txn,
             const std::string& table_name,
@@ -483,6 +517,10 @@ class RocksDBStorage : public Storage {
             return GetStatus(txn->Put(cf, rocksdb::Slice(storageKey(table_name, row_key, column_qualifier)), rocksdb::Slice(std::move(data))), "Update commit row");
         }
 
+        /**
+            All RawData* methods implement lowest-level basic row storage operations.
+            Get some binary representation of row data (we don't know anything about it) from underlying RocksDB storage.
+         */
         inline Status RawDataGet(
             rocksdb::Transaction* txn,
             const std::string& table_name,
@@ -496,6 +534,10 @@ class RocksDBStorage : public Storage {
             return GetStatus(txn->Get(roptions, cf, rocksdb::Slice(storageKey(table_name, row_key, column_qualifier)), out), "Load commit row", Status());
         }
 
+        /**
+            All RawData* methods implement lowest-level basic row storage operations.
+            Delete underlying data repsenting given row's column.
+         */
         inline Status RawDataDeleteColumn(
             rocksdb::Transaction* txn,
             const std::string& table_name,
@@ -507,6 +549,11 @@ class RocksDBStorage : public Storage {
             return GetStatus(txn->Delete(cf, rocksdb::Slice(storageKey(table_name, row_key, column_qualifier))), "Delete row column");
         }
 
+        /**
+            All RawData* methods implement lowest-level basic row storage operations.
+            Delete underlying data represneting entire row.
+            Depending on assumed data model, this might be more expensive than RawDataDeleteColumn()
+        */
         inline Status RawDataDelete(
             rocksdb::Transaction* txn,
             const std::string& table_name,
