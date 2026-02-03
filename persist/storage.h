@@ -19,6 +19,7 @@
 #include "google/cloud/internal/make_status.h"
 #include <google/bigtable/admin/v2/table.pb.h>
 #include <google/bigtable/v2/data.pb.h>
+#include <rocksdb/iterator.h>
 #include "absl/flags/declare.h"
 #include "absl/flags/flag.h"
 
@@ -213,7 +214,8 @@ class RocksDBColumnFamilyStream : public AbstractFamilyColumnStreamImpl {
     std::string const& column_family_name,
     rocksdb::ColumnFamilyHandle* handle,
     std::shared_ptr<StringRangeSet const> row_set,
-    RocksDBStorage* db
+    RocksDBStorage* db,
+    const std::string table_name
   );
 
   virtual ~RocksDBColumnFamilyStream();
@@ -232,6 +234,7 @@ class RocksDBColumnFamilyStream : public AbstractFamilyColumnStreamImpl {
   using TColumnFamilyRow = std::map<std::string, TColumnRow>;
 
   std::string column_family_name_;
+  std::string table_name_;
   rocksdb::ColumnFamilyHandle* handle_;
   std::shared_ptr<StringRangeSet const> row_ranges_;
   std::vector<std::shared_ptr<re2::RE2 const>> row_regexes_;
@@ -371,6 +374,76 @@ class RocksDBStorage : public Storage {
         
         virtual ~RocksDBStorage() {
             Close();
+        }
+
+        static inline std::string storageKey(
+            const std::string& table_name,
+            const std::string& row_key
+        ) {
+            return absl::StrCat(table_name, "|", row_key);
+        }
+
+        //row_iter_->Seek(absl::get<std::string>(firs
+
+        inline std::tuple<std::string, std::string> RawDataParseRowKey(
+            rocksdb::Iterator* iter
+        ) {
+            const auto key = iter->key().ToString();
+            std::vector<std::string_view> result; 
+            auto left = key.begin(); 
+            for (auto it = left; it != key.end(); ++it) 
+            { 
+                if (*it == '|') 
+                { 
+                    result.emplace_back(&*left, it - left); 
+                    left = it + 1; 
+                } 
+            } 
+            if (left != key.end()) {
+                result.emplace_back(&*left, key.end() - left); 
+            }
+            return std::make_tuple(std::string(result[0]), std::string(result[1]));
+        }
+
+        inline void RawDataSeekPrefixed(
+            rocksdb::Iterator* iter,
+            const std::string& table_name,
+            const std::string& row_prefix
+        ) {
+            iter->Seek(rocksdb::Slice(storageKey(table_name, row_prefix)));
+        }
+
+        inline Status RawDataPut(
+            rocksdb::Transaction* txn,
+            const std::string& table_name,
+            const std::string& column_family,
+            const std::string& row_key,
+            std::string&& data
+        ) {
+            const auto& cf = column_families_handles_map[column_family];
+            return GetStatus(txn->Put(cf, rocksdb::Slice(storageKey(table_name, row_key)), rocksdb::Slice(std::move(data))), "Update commit row");
+        }
+
+        inline Status RawDataGet(
+            rocksdb::Transaction* txn,
+            const std::string& table_name,
+            const std::string& column_family,
+            const std::string& row_key,
+            std::string* out
+        ) {
+            rocksdb::ReadOptions roptions;
+            const auto& cf = column_families_handles_map[column_family];
+            return GetStatus(txn->Get(roptions, cf, rocksdb::Slice(storageKey(table_name, row_key)), out), "Load commit row", Status());
+        }
+
+        inline Status RawDataDelete(
+            rocksdb::Transaction* txn,
+            const std::string& table_name,
+            const std::string& column_family,
+            const std::string& row_key
+        ) {
+            const auto& cf = column_families_handles_map[column_family];
+            return GetStatus(txn->Delete(cf, rocksdb::Slice(storageKey(table_name, row_key))), "Delete row");
         }
 
         // Start transaction
@@ -773,7 +846,7 @@ class RocksDBStorage : public Storage {
             }
 
             inline void loadTableData() {
-                if (!isValid() || loaded_table_data) {
+                if (!isValid()) {
                     return;
                 }
                 auto meta = DeserializeTableMeta(iter->value().ToString());
@@ -949,7 +1022,7 @@ class RocksDBStorage : public Storage {
                 if (x == nullptr) {
                     continue;
                 }
-                std::unique_ptr<AbstractFamilyColumnStreamImpl> c = std::make_unique<RocksDBColumnFamilyStream>(it.first, x, range_set, this);
+                std::unique_ptr<AbstractFamilyColumnStreamImpl> c = std::make_unique<RocksDBColumnFamilyStream>(it.first, x, range_set, this, table_name);
                 iters.push_back(std::move(c));
             }
             return CellStream(std::make_unique<StorageFitleredTableStream>(std::move(iters)));
@@ -1102,16 +1175,16 @@ inline RocksDBStorageRowTX::RocksDBStorageRowTX(
 inline Status RocksDBStorageRowTX::DeleteRowFromColumnFamily(
     std::string const& column_family
 ) {
-    auto cf = db_->column_families_handles_map[column_family];
     data_.erase(column_family);
-    return db_->GetStatus(txn_->Delete(cf, rocksdb::Slice(row_key_)), "Delete row");
+    return db_->RawDataDelete(txn_, table_name_, column_family, row_key_);
 }
 
 inline Status RocksDBStorageRowTX::Commit() {
     for (auto const& row_entry : data_) {
-        auto cf = db_->column_families_handles_map[row_entry.first];
         auto out = db_->SerializeRow(row_entry.second);
-        auto status = db_->GetStatus(txn_->Put(cf, rocksdb::Slice(row_key_), rocksdb::Slice(std::move(out))), "Update commit row");
+        auto status = db_->RawDataPut(
+            txn_, table_name_, row_entry.first, row_key_, std::move(out)
+        );
         if (!status.ok()) {
             return Rollback(status);
         }
@@ -1125,10 +1198,11 @@ inline Status RocksDBStorageRowTX::Commit() {
 
 inline Status RocksDBStorageRowTX::LoadRow(std::string const& column_family) {
     if(data_.find(column_family) == data_.end()) {
-        auto cf = db_->column_families_handles_map[column_family];
         std::string out;
         // Get won't fail if there's no row
-        auto get_status = db_->GetStatus(txn_->Get(roptions_, cf, rocksdb::Slice(row_key_), &out), "Load commit row", Status());
+        auto get_status = db_->RawDataGet(
+            txn_, table_name_, column_family, row_key_, &out
+        );
         if (!get_status.ok()) {
             return get_status;
         }
@@ -1288,14 +1362,15 @@ inline RocksDBColumnFamilyStream::RocksDBColumnFamilyStream(
     std::string const& column_family_name,
     rocksdb::ColumnFamilyHandle* handle,
     std::shared_ptr<StringRangeSet const> row_set,
-    RocksDBStorage* db
+    RocksDBStorage* db,
+    const std::string table_name
 ): 
     column_family_name_(column_family_name),
     handle_(handle),
     row_ranges_(std::move(row_set)),
     column_ranges_(StringRangeSet::All()),
     timestamp_ranges_(TimestampRangeSet::All()),
-    db_(db), initialized_(false), row_iter_(nullptr) {}
+    db_(db), initialized_(false), row_iter_(nullptr), table_name_(std::move(table_name)) {}
 
 
 inline bool RocksDBColumnFamilyStream::HasValue() const {
@@ -1321,7 +1396,7 @@ inline void RocksDBColumnFamilyStream::NextRow() const {
         if (!ranges.empty()) {
             auto const& first_range = *ranges.begin();
             if (absl::holds_alternative<std::string>(first_range.start())) {
-                row_iter_->Seek(absl::get<std::string>(first_range.start()));
+                db_->RawDataSeekPrefixed(row_iter_, table_name_, absl::get<std::string>(first_range.start()));
             } else {
                 row_iter_->SeekToFirst();
             }
@@ -1335,7 +1410,11 @@ inline void RocksDBColumnFamilyStream::NextRow() const {
     DBG("RocksDBColumnFamilyStream : while loop");
     // Skip rows until we find one in our range
     while (row_iter_->Valid()) {
-        std::string key = row_iter_->key().ToString();
+        const auto [table_name, key] = db_->RawDataParseRowKey(row_iter_);
+        DBG("table_name="+table_name+"  key="+key);
+        if (table_name != table_name_) {
+            break;
+        }
         DBG("RocksDBColumnFamilyStream : key is ");
         DBG(key);
         
