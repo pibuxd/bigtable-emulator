@@ -145,13 +145,14 @@ bool Cluster::HasTable(std::string const& table_name) const {
   return storage_->HasTable(table_name);
 }
 
-StatusOr<std::shared_ptr<Table2>> Cluster::FindTable(std::string const& table_name) {
+StatusOr<std::shared_ptr<PersistedTable>> Cluster::FindTable(
+    std::string const& table_name) {
   auto maybe_table = storage_->GetTable(table_name);
   if (!maybe_table.ok()) {
     return NotFoundError("No such table.", GCP_ERROR_INFO().WithMetadata(
                                                "table_name", table_name));
   }
-  return std::make_shared<Table2>(table_name, storage_);
+  return std::make_shared<PersistedTable>(table_name, storage_);
 }
 
 StatusOr<std::shared_ptr<Table>> Cluster::FindLegacyTable(

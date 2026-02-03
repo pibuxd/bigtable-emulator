@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "persist/example.h"
-
 #include "server.h"
 #include "cluster.h"
 #include "row_streamer.h"
@@ -42,6 +40,7 @@
 #include <utility>
 
 #include "persist/storage.h"
+#include "persist/rocksdb/storage.h"
 
 namespace google {
 namespace cloud {
@@ -400,41 +399,6 @@ StatusOr<std::unique_ptr<EmulatorServer>> CreateDefaultEmulatorServer(
                             .WithMetadata("host", host)
                             .WithMetadata("port", absl::StrCat("%d", port)));
   }
-
-  // RocksDBStorage s = RocksDBStorage();
-  // auto status = s.Open();
-  // if (!status.ok()) {
-  //   return status;
-  // }
-  // status = s.CreateNewTableEntry("TESTING");
-  // if (!status.ok()) {
-  //   return status;
-  // }
-  // status = s.CreateNewTableEntry("TESTINGA1");
-  // if (!status.ok()) {
-  //   return status;
-  // }
-  // status = s.CreateNewTableEntry("TESTINGB2");
-  // if (!status.ok()) {
-  //   return status;
-  // }
-  // status = s.CreateNewTableEntry("TESTINGA0");
-  // if (!status.ok()) {
-  //   return status;
-  // }
-  // s.ForEachTable([](auto name, auto meta){
-  //   std::cout<< "TABLE[" << name << "] schema.name = {" << meta.has_table() << " => " << meta.table().name() << "}\n";
-  // }, "TESTINGA");
-  // std::cout << "GetTable works? {" << s.GetTable("TESTING").value().table().name() << "}\n";
-  // auto t = s.GetTable("TESTINGX");
-  // if (!t.ok()) {
-  //   std::cout << "EEOERER\n" << t.status().message() << "\n";
-  //   return status;
-  // }
-  // std::cout << "OK\n";
-
-  ExampleClusterCode(default_emulator_server->cluster_, s);
-
   return std::unique_ptr<EmulatorServer>(default_emulator_server);
 }
 
