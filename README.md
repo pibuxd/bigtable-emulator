@@ -12,8 +12,8 @@ After running `./testing.sh`, this testing code runs, then the server starts. Yo
 
 ### Implementation
 
-Main implementation is in `persist/storage.h` and `persist/table2.h`. 
-I copied `table.cc` into `persist/table2.h` - header-only (for now) class Table2 that serves as new class for all functionality.
+Main implementation is in `persist/storage.h` and `persist/persisted_table.h`. 
+`PersistedTable` provides the table interface backed by RocksDB-persisted storage.
 
 RocksDB uses TransactionDB to have ACID guarantees. All mutation operations go through transactions.
 

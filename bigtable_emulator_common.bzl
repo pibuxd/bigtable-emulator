@@ -32,8 +32,8 @@ bigtable_emulator_common_hdrs = [
     "persist/rocksdb/storage_row_tx.h",
     "persist/rocksdb/column_family_stream.h",
     "persist/rocksdb/filtered_table_stream.h",
-    "persist/example.h",
-    "persist/table2.h",
+    "persist/persisted_table.h",
+    "persist/test_utils.h",
 ]
 
 bigtable_emulator_common_srcs = [
@@ -48,4 +48,5 @@ bigtable_emulator_common_srcs = [
     "to_grpc_status.cc",
     "persist/rocksdb/storage_row_tx.cc",
     "persist/rocksdb/column_family_stream.cc",
+    "persist/persisted_table.cc",
 ]

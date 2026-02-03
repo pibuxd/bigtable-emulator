@@ -15,7 +15,7 @@
 #ifndef GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_CLUSTER_H
 #define GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_CLUSTER_H
 
-#include "persist/table2.h"
+#include "persist/persisted_table.h"
 #include "persist/rocksdb/storage.h"
 #include "table.h"
 #include "google/cloud/status.h"
@@ -110,7 +110,8 @@ class Cluster {
   StatusOr<std::shared_ptr<Table>> FindLegacyTable(std::string const& table_name);
 
   
-  StatusOr<std::shared_ptr<Table2>> FindTable(std::string const& table_name);
+  StatusOr<std::shared_ptr<PersistedTable>> FindTable(
+      std::string const& table_name);
   
 
  private:
