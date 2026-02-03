@@ -109,15 +109,14 @@ StatusOr<std::vector<btadmin::Table>> Cluster::ListTables(
   std::vector<btadmin::Table> res;
   std::string const prefix = instance_name + "/tables/";
 
-  storage_->ForEachTable([&res, &view](auto const& name, auto const& meta) -> Status {
+  for(auto [name, meta] : storage_->Tables()) {
     auto maybe_view =
         ApplyView(name, meta.table(), view, btadmin::Table::NAME_ONLY);
     if (!maybe_view) {
       return maybe_view.status();
     }
     res.emplace_back(*maybe_view);
-    return Status();
-  }, prefix);
+  }
   return res;
 }
 

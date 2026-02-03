@@ -247,7 +247,7 @@ class Table2 {
                                           absl::StrFormat("%zu", row_key.size())));
       }
 
-      auto txn = storage_->RowTransaction(row_key);
+      auto txn = storage_->RowTransaction(name_, row_key);
 
       for (auto const& mutation : mutations) {
         if (mutation.has_set_cell()) {
@@ -461,7 +461,7 @@ class Table2 {
             GCP_ERROR_INFO().WithMetadata("request", request.DebugString()));
       }
 
-      auto txn = storage_->RowTransaction(request.row_key());
+      auto txn = storage_->RowTransaction(name_, request.row_key());
 
       // Build response row with modified cells
       google::bigtable::v2::ReadModifyWriteRowResponse resp;
