@@ -16,7 +16,7 @@ message RowColumnData {
 }
 
 message RowData {
-  map<string, RowColumnData> columns = 1;
+  RowColumnData column = 1;
 }
 
 message TableMeta {
