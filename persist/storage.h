@@ -262,7 +262,8 @@ class RocksDBColumnFamilyStream : public AbstractFamilyColumnStreamImpl {
     rocksdb::ColumnFamilyHandle* handle,
     std::shared_ptr<StringRangeSet const> row_set,
     RocksDBStorage* db,
-    const std::string table_name
+    const std::string table_name,
+    const bool prefetch_all_columns
   );
 
   virtual ~RocksDBColumnFamilyStream();
@@ -282,6 +283,7 @@ class RocksDBColumnFamilyStream : public AbstractFamilyColumnStreamImpl {
 
   std::string column_family_name_;
   std::string table_name_;
+  const bool prefetch_all_columns_;
   rocksdb::ColumnFamilyHandle* handle_;
   std::shared_ptr<StringRangeSet const> row_ranges_;
   std::vector<std::shared_ptr<re2::RE2 const>> row_regexes_;
@@ -1095,7 +1097,8 @@ class RocksDBStorage : public Storage {
 
         CellStream StreamTable(
             std::string const& table_name,
-            std::shared_ptr<StringRangeSet> range_set
+            std::shared_ptr<StringRangeSet> range_set,
+            bool prefetch_all_columns = false
         ) {
             std::vector<std::unique_ptr<AbstractFamilyColumnStreamImpl>> iters;
             auto table = GetTable(table_name);
@@ -1105,7 +1108,7 @@ class RocksDBStorage : public Storage {
                 if (x == nullptr) {
                     continue;
                 }
-                std::unique_ptr<AbstractFamilyColumnStreamImpl> c = std::make_unique<RocksDBColumnFamilyStream>(it.first, x, range_set, this, table_name);
+                std::unique_ptr<AbstractFamilyColumnStreamImpl> c = std::make_unique<RocksDBColumnFamilyStream>(it.first, x, range_set, this, table_name, prefetch_all_columns);
                 iters.push_back(std::move(c));
             }
             return CellStream(std::make_unique<StorageFitleredTableStream>(std::move(iters)));
@@ -1476,14 +1479,15 @@ inline RocksDBColumnFamilyStream::RocksDBColumnFamilyStream(
     rocksdb::ColumnFamilyHandle* handle,
     std::shared_ptr<StringRangeSet const> row_set,
     RocksDBStorage* db,
-    const std::string table_name
+    const std::string table_name,
+    const bool prefetch_all_columns
 ): 
     column_family_name_(column_family_name),
     handle_(handle),
     row_ranges_(std::move(row_set)),
     column_ranges_(StringRangeSet::All()),
     timestamp_ranges_(TimestampRangeSet::All()),
-    db_(db), initialized_(false), row_iter_(nullptr), table_name_(std::move(table_name)) {}
+    db_(db), initialized_(false), row_iter_(nullptr), table_name_(std::move(table_name)), prefetch_all_columns_(prefetch_all_columns) {}
 
 
 inline bool RocksDBColumnFamilyStream::HasValue() const {
@@ -1544,7 +1548,10 @@ inline void RocksDBColumnFamilyStream::NextRow() const {
         if (in_range) {
             // Found a valid row in range
             auto data = TColumnFamilyRow();
-            // Collect all columns
+            // This code prefetches all columns for given row
+            // This happens only if prefetch_all_columns is set to true
+            // (when contructing the stream instance)
+            // It can increase efficiency of reads
             DBG("RocksDBColumnFamilyStream : Collect");
             while(row_iter_->Valid()) {
                 const auto [c_table_name, c_row_key, c_column_qualifier] = db_->RawDataParseRowKey(row_iter_);
@@ -1561,6 +1568,10 @@ inline void RocksDBColumnFamilyStream::NextRow() const {
                     data[c_column_qualifier][std::chrono::milliseconds(i.first)] = i.second;
                 }
                 row_iter_->Next();
+                // If we don't do prefetch, then we just have map with only one column
+                if (!prefetch_all_columns_) {
+                    break;
+                }
             }
             DBG("RocksDBColumnFamilyStream : Done collection");
             for (auto i : data) {
