@@ -25,6 +25,16 @@
 #define EXPECT_ROWS(MANAGER, TABLE_NAME, ...) \
   EXPECT_EQ(((MANAGER).getTableRowsDump(TABLE_NAME)), (rows_dump{__VA_ARGS__}));
 
+#define TXN(STORAGE, ...) \
+  ([&]() -> auto { \
+    auto maybeTxn = (STORAGE)->RowTransaction(__VA_ARGS__); \
+    if (!maybeTxn.ok()) { \
+      LERROR("Transaction creation failed in test"); \
+      assert(false); \
+    } \
+    return std::move(maybeTxn.value()); \
+  }())
+
 namespace google {
 namespace cloud {
 namespace bigtable {

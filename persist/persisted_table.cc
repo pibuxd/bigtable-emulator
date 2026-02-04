@@ -755,10 +755,18 @@ PersistedTable::CheckAndMutateRow(
 StatusOr<CellStream> PersistedTable::CreateCellStream(
     std::shared_ptr<StringRangeSet> range_set,
     absl::optional<google::bigtable::v2::RowFilter> maybe_row_filter) const {
-  auto table_stream_ctor = [range_set = std::move(range_set), this] {
-    // FIXME: This can return error. Should do
-    // if(storage_->StreamTable(...).ok()) instead
-    return storage_->StreamTable(name_, range_set, false).value();
+  
+
+  auto maybeStream = storage_->StreamTable(name_, range_set, false);
+  if (!maybeStream.ok()) {
+    LERROR(
+      "[PersistedTable][CreateCellStream] Failes to create stream for table name={}",
+      name_);
+    return maybeStream.status();
+  }
+
+  auto table_stream_ctor = [&maybeStream, this] {
+    return std::move(maybeStream.value());
   };
 
   if (maybe_row_filter.has_value()) {

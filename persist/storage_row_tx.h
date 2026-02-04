@@ -85,7 +85,7 @@ class StorageRowTX {
    * @param start Start of range (inclusive).
    * @param end End of range (exclusive).
    */
-  Status DeleteRowColumn(std::string const& column_family,
+  virtual Status DeleteRowColumn(std::string const& column_family,
                          std::string const& column_qualifier,
                          std::chrono::milliseconds& start,
                          std::chrono::milliseconds& end) {
@@ -104,7 +104,7 @@ class StorageRowTX {
    * @param column_qualifier The column qualifier.
    * @param value The timestamp of the cell to delete.
    */
-  Status DeleteRowColumn(std::string const& column_family,
+  virtual Status DeleteRowColumn(std::string const& column_family,
                          std::string const& column_qualifier,
                          std::chrono::milliseconds& value) {
     std::chrono::milliseconds value_end = value;
