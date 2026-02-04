@@ -15,4 +15,10 @@
     fmtlog::poll();             \
   }
 
+static inline void ConfigureEmulatorLogging() {
+  fmtlog::setLogFile("emulator.log", false);
+  fmtlog::setLogLevel(fmtlog::WRN);
+  fmtlog::setThreadName("main");
+}
+
 #endif  // GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_PERSIST_LOGGING_H
