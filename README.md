@@ -59,6 +59,45 @@ This layout lets us read a single row at a time and stream through rows efficien
 This means that we need to do some suboptimal stuff in `storage.h`. To stream rows we need to construct iterator. As we group the data we load one row at a time - see `RocksDBStorageRowTX::LoadRow()`. When it happens we 
 need to map protobuf into C++ map to get correct ordering. I think this is avoidable somehow, but that kind of performance issue isn't our highest-priority concern right now.
 
+### CustomStorage: implementing custom storage interface
+
+To implement custom storage you need to provide two classes: one that inherits from `Storage` in `persist/storage.h` and one that inherits from `StorageRowTX` in `persist/storage_row_tx.h`. The storage class is responsible for metadata, table lifecycle, and opening/closing the backend; it must also create row-scoped transactions that return your `StorageRowTX` implementation. The row transaction class performs all per-row mutations (SetCell, DeleteRowColumn, etc.) and commit/rollback. Reference implementations are `MemoryStorage` with `MemoryStorageRowTX` in `persist/memory/` and `RocksDBStorage` with `RocksDBStorageRowTX` in `persist/rocksdb/`.
+
+**Storage (persist/storage.h)** — implement these virtual methods:
+
+| Method | Description (from source) |
+|--------|---------------------------|
+| `UncheckedOpen(additional_cf_names)` | Protected. Setup the storage engine; guaranteed not to be double-invoked (either first call or after `Close()`). Argument: list of extra column families to load. |
+| `UncheckedClose()` | Protected. Tear down the storage engine; same single-invocation guarantee as `UncheckedOpen()`. |
+| `RowTransaction(table_name, row_key)` | Starts a row-scoped transaction; returns your `StorageRowTX` implementation. |
+| `CreateTable(schema)` | Creates a table with the given schema. |
+| `DeleteTable(table_name, precondition_fn)` | Deletes a table after running the precondition. |
+| `GetTable(table_name)` | Returns table metadata. |
+| `UpdateTableMetadata(table_name, meta)` | Updates table metadata (e.g. after CreateTable()). |
+| `EnsureColumnFamiliesExist(cf_names)` | Ensures the given column families exist. |
+| `HasTable(table_name)` | Returns true if the table exists. |
+| `DeleteColumnFamily(cf_name)` | Deletes a column family (may be expensive depending on implementation). |
+| `Tables(prefix)` | Returns a view of table metadata with keys starting with prefix. Guarantees: random const access iterator (std contiguous range), snapshot of tables at call time even if mutations happen meanwhile. |
+| `StreamTable(table_name, range_set, prefetch_all_columns)` | Returns a cell stream over the table for the given row set. `prefetch_all_columns` can fetch all columns for a row in bulk (useful for small column sizes); implementation may ignore it. |
+
+`Open()` and `Close()` are non-virtual helpers that guard against double open/close and call your `UncheckedOpen`/`UncheckedClose`. `Tables()` with no argument and `StreamTableFull`/`StreamTable` with one or two arguments delegate to the methods above.
+
+**StorageRowTX (persist/storage_row_tx.h)** — implement commit/rollback and row mutations:
+
+| Method | Description (from source) |
+|--------|---------------------------|
+| `Commit()` | Commits the transaction. |
+| `Rollback(s)` | Rolls back the transaction with the given status. |
+| `SetCell(column_family, column_qualifier, timestamp, value)` | Sets a specific cell value. |
+| `UpdateCell(column_family, column_qualifier, timestamp, value, update_fn)` | Updates a cell with the given functor; returns the old value. |
+| `DeleteRowColumn(column_family, column_qualifier, time_range)` | Deletes cells in the given time range (inclusive start, exclusive end). |
+| `DeleteRowColumn(..., start, end)` | Overload with start/end in milliseconds. |
+| `DeleteRowColumn(..., value)` | Deletes the cell at the exact timestamp (start <= timestamp < start+1ms). |
+| `DeleteRowFromColumnFamily(column_family)` | Deletes the row from the given column family. |
+| `DeleteRowFromAllColumnFamilies()` | Deletes the row from all column families. |
+
+Wire your storage into the emulator the same way RocksDB is wired in `server.cc` (e.g. instantiate your `Storage` and pass it to the server/cluster).
+
 ### Testing
 
 We provide several levels of testing:
@@ -176,6 +215,13 @@ Note that the cache directory grows indefinitely.
 ```bash
 # On bash you need to enable globstar with `shopt -s globstar` first
 clang-format -i -style=file -assume-filename=.clang-format **/*.cc **/*.h
+```
+
+### `compile_commands.json`
+
+If you need to generate `compile_commands.json` for your tooling, run:
+```shell
+bazel run --config=compile-commands
 ```
 
 ## Contributing changes
