@@ -1,6 +1,6 @@
 /**
  * @file storage_row_tx.h
- * @brief RocksDB implementation of row-scoped storage transaction.
+ * @brief In-memory implementation of row-scoped storage transaction.
  */
 
 #ifndef GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_MEMORY_STORAGE_ROW_TX_H
@@ -9,7 +9,6 @@
 #include "table.h"
 #include "persist/storage_row_tx.h"
 #include "persist/proto/storage.pb.h"
-#include "rocksdb/utilities/transaction.h"
 #include <map>
 #include <string>
 #include <tuple>
@@ -22,7 +21,10 @@ namespace emulator {
 class MemoryStorage;
 
 /**
- * RocksDB implementation of a row-scoped storage transaction.
+ * In-memory implementation of a row-scoped storage transaction.
+ *
+ * Uses an undo stack to support rollback; all mutations are applied to
+ * the in-memory Table and reverted on rollback or destructor.
  */
 class MemoryStorageRowTX : public StorageRowTX {
   friend class MemoryStorage;
@@ -30,10 +32,10 @@ class MemoryStorageRowTX : public StorageRowTX {
   /** Destroys the transaction (rolls back if not committed). */
   virtual ~MemoryStorageRowTX();
 
-  /** Commits the transaction. */
+  /** Commits the transaction (marks as committed; no further rollback). */
   virtual Status Commit() override;
 
-  /** Rolls back the transaction. */
+  /** Rolls back the transaction with the given status (replays undo stack). */
   virtual Status Rollback(Status status) override;
 
   /** @copydoc StorageRowTX::SetCell */
@@ -69,16 +71,24 @@ class MemoryStorageRowTX : public StorageRowTX {
   ) override;
 
  private:
-  const std::string row_key_;
-  const std::string table_name_;
-  MemoryStorage* db_;
-  std::shared_ptr<Table> table_;
+  const std::string row_key_;    /**< Row key for this transaction. */
+  const std::string table_name_; /**< Table name for this transaction. */
+  MemoryStorage* db_;           /**< Backing in-memory storage. */
+  std::shared_ptr<Table> table_; /**< Table instance being mutated. */
 
-  bool committed_;
-  std::stack<absl::variant<DeleteValue, RestoreValue>> undo_;
+  bool committed_; /**< True after Commit(); used to skip undo on destruct. */
+  std::stack<absl::variant<DeleteValue, RestoreValue>> undo_; /**< Undo log for rollback. */
 
+  /** Replays the undo stack to restore state (used on rollback). */
   void Undo();
 
+  /**
+   * Private constructor; use MemoryStorage::RowTransaction() to create.
+   * @param table_name Table name.
+   * @param row_key Row key.
+   * @param db Pointer to backing MemoryStorage.
+   * @param table Shared pointer to the Table instance.
+   */
   explicit MemoryStorageRowTX(
       const std::string table_name,
       const std::string row_key,

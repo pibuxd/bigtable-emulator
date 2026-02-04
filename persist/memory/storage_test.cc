@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/**
+ * @file storage_test.cc
+ * @brief Unit tests for in-memory storage implementation (MemoryStorage, MemoryStorageRowTX).
+ */
 
 #include "persist/memory/storage.h"
 #include "persist/test_utils.h"
@@ -21,7 +25,8 @@ namespace cloud {
 namespace bigtable {
 namespace emulator {
 namespace {
-  
+
+/** Tests CreateTable, RowTransaction, SetCell, DeleteRowColumn, DeleteRowFromColumnFamily, DeleteRowFromAllColumnFamilies. */
 TEST(MemoryStorage, CreateTableBasic) {
   MemoryStorageTestManager m;
   
