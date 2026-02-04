@@ -20,9 +20,9 @@ bigtable_emulator_unit_tests = [
     "filtered_map_test.cc",
     "mutations_test.cc",
     "range_set_test.cc",
-    "server_test.cc",
     "table_test.cc",
     "persist/rocksdb/storage_test.cc",
     "cluster_test.cc",
     "persist/memory/storage_test.cc",
+    "server_test.cc",
 ]

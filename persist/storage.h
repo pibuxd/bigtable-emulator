@@ -63,19 +63,37 @@ static inline google::bigtable::admin::v2::Table FakeSchema(std::string const& t
  * Abstract storage interface for the Bigtable emulator.
  */
 class Storage {
+ private:
+  bool is_open_ = false;
+ protected:
+   virtual Status UncheckedOpen(std::vector<std::string> additional_cf_names) = 0;
+   virtual Status UncheckedClose() = 0;
  public:
   /** Default constructor. */
   Storage() {}
   /** Destroys the storage. */
   virtual ~Storage() = default;
-  /** Closes the storage and releases resources. */
-  virtual Status Close() = 0;
 
   /** Starts a row-scoped transaction. */
   virtual std::unique_ptr<StorageRowTX> RowTransaction(std::string const& table_name, std::string const& row_key) = 0;
+  
+  /** Closes the storage and releases resources. */
+  virtual Status Close() {
+    if (!is_open_) {
+      return Status();
+    }
+    is_open_ = false;
+   return this->UncheckedClose();
+  };
 
   /** Opens the storage; optionally creates additional column families. */
-  virtual Status Open(std::vector<std::string> additional_cf_names = {}) = 0;
+  virtual Status Open(std::vector<std::string> additional_cf_names = {}) {
+    if (is_open_) {
+      return Status();
+    }
+    is_open_ = true;
+    return this->UncheckedOpen(additional_cf_names);
+  };
 
   /** Creates a table with the given schema. */
   virtual Status CreateTable(google::bigtable::admin::v2::Table& schema) = 0;

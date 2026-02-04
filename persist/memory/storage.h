@@ -97,7 +97,7 @@ class MemoryStorage : public Storage {
   }
 
   /** Closes the storage and releases resources. */
-  virtual Status Close() override {
+  virtual Status UncheckedClose() override {
     return Status();
   };
 
@@ -110,7 +110,7 @@ class MemoryStorage : public Storage {
   };
 
   /** Opens the storage; optionally creates additional column families. */
-  virtual Status Open(std::vector<std::string> additional_cf_names = {}) override {
+  virtual Status UncheckedOpen(std::vector<std::string> additional_cf_names = {}) override {
     return Status();
   };
 
