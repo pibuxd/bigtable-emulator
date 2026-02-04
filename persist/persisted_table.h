@@ -7,7 +7,6 @@
 #define GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_PERSISTED_TABLE_H
 
 #include "persist/storage.h"
-#include "persist/rocksdb/storage.h"
 #include "column_family.h"
 #include "limits.h"
 #include "filter.h"
@@ -60,7 +59,7 @@ StatusOr<StringRangeSet> CreateStringRangeSet(
 class PersistedTable {
  private:
   /** Underlying RocksDB storage instance. */
-  std::shared_ptr<RocksDBStorage> storage_;
+  std::shared_ptr<Storage> storage_;
 
   /** Table name in the form /projects/{}/instances/{}/tables/{}. */
   std::string name_;
@@ -82,7 +81,7 @@ class PersistedTable {
    * @param storage Shared pointer to the RocksDB storage backend.
    */
   PersistedTable(std::string const& name,
-                 std::shared_ptr<RocksDBStorage> storage);
+                 std::shared_ptr<Storage> storage);
 
   /**
    * Applies mutations to a single row atomically.

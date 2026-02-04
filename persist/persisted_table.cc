@@ -57,7 +57,7 @@ StatusOr<StringRangeSet> CreateStringRangeSet(
 }
 
 PersistedTable::PersistedTable(std::string const& name,
-                               std::shared_ptr<RocksDBStorage> storage)
+                               std::shared_ptr<Storage> storage)
     : name_(name), storage_(storage) {}
 
 absl::optional<google::bigtable::admin::v2::Type>
@@ -642,7 +642,8 @@ StatusOr<CellStream> PersistedTable::CreateCellStream(
     std::shared_ptr<StringRangeSet> range_set,
     absl::optional<google::bigtable::v2::RowFilter> maybe_row_filter) const {
   auto table_stream_ctor = [range_set = std::move(range_set), this] {
-    return storage_->StreamTable(name_, range_set);
+    // FIXME: This can return error. Should do if(storage_->StreamTable(...).ok()) instead
+    return storage_->StreamTable(name_, range_set, false).value();
   };
 
   if (maybe_row_filter.has_value()) {

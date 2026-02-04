@@ -16,6 +16,7 @@
 #include "absl/flags/parse.h"
 #include "absl/flags/usage.h"
 #include "absl/strings/str_cat.h"
+#include "persist/rocksdb/storage.h"
 #include "server.h"
 #include <cstdint>
 #include <cstdlib>
@@ -36,7 +37,7 @@ int main(int argc, char* argv[]) {
 
   auto maybe_server =
       google::cloud::bigtable::emulator::CreateDefaultEmulatorServer(
-          absl::GetFlag(FLAGS_host), absl::GetFlag(FLAGS_port));
+          absl::GetFlag(FLAGS_host), absl::GetFlag(FLAGS_port), std::make_shared<google::cloud::bigtable::emulator::RocksDBStorage>());
   if (!maybe_server) {
     std::cerr << "CreateDefaultEmulatorServer() failed. See logs for "
                  "possible reason"

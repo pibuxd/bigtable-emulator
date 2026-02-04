@@ -47,6 +47,8 @@ namespace cloud {
 namespace bigtable {
 namespace emulator {
 
+class MemoryStorageRowTX;
+
 /// Objects of this class represent Bigtable tables.
 class Table : public std::enable_shared_from_this<Table> {
  public:
@@ -110,10 +112,13 @@ class Table : public std::enable_shared_from_this<Table> {
   Table() = default;
   friend class RowSetIterator;
   friend class RowTransaction;
+  friend class MemoryStorageRowTX;
 
   template <typename MESSAGE>
   StatusOr<std::reference_wrapper<ColumnFamily>> FindColumnFamily(
       MESSAGE const& message) const;
+  StatusOr<std::reference_wrapper<ColumnFamily>> FindColumnFamily(
+      std::string const& message) const;
   bool IsDeleteProtectedNoLock() const;
   Status Construct(google::bigtable::admin::v2::Table schema);
   Status DoMutationsWithPossibleRollback(

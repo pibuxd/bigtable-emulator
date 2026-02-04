@@ -8,6 +8,7 @@
 
 #include "persist/storage.h"
 #include "persist/rocksdb/storage_row_tx.h"
+#include "persist/metadata_view.h"
 #include "persist/rocksdb/column_family_stream.h"
 #include "persist/rocksdb/filtered_table_stream.h"
 #include "filter.h"
@@ -429,7 +430,7 @@ class RocksDBStorage : public Storage {
   }
 
   /** @copydoc Storage::DeleteTable */
-  virtual Status DeleteTable(std::string table_name, std::function<Status(std::string, storage::TableMeta)>&& precondition_fn) const {
+  virtual Status DeleteTable(std::string table_name, std::function<Status(std::string, storage::TableMeta)>&& precondition_fn) {
     auto txn = StartRocksTransaction();
 
     std::string out;
@@ -716,28 +717,16 @@ class RocksDBStorage : public Storage {
     inline TablesMetadataIterator<with_prefix> end() const {
       return TablesMetadataIterator<with_prefix>(std::monostate{});
     }
-
-    /** Returns vector of table names in this view. */
-    inline std::vector<std::string> names() const {
-      std::vector<std::string> tmp;
-      DBG("TablesMetadataView:names listing tables");
-      std::transform(begin(), end(), std::back_inserter(tmp), [](auto el) -> auto {
-        DBG(absl::StrCat("TablesMetadataView:names => ", std::get<0>(el)));
-        return std::get<0>(el);
-      });
-      DBG("TablesMetadataView:names end");
-      return tmp;
-    }
   };
 
   /** Returns a view of all table metadata. */
-  inline TablesMetadataView<false, RocksDBStorage> Tables() const {
-    return TablesMetadataView<false, RocksDBStorage>(this);
+  virtual CachedTablesMetadataView Tables() const override {
+    return CachedTablesMetadataView(TablesMetadataView<false, RocksDBStorage>(this));
   }
 
   /** Returns a view of table metadata with keys starting with prefix. */
-  inline TablesMetadataView<true, RocksDBStorage> Tables(const std::string& prefix) const {
-    return TablesMetadataView<true, RocksDBStorage>(this, prefix);
+  virtual CachedTablesMetadataView Tables(const std::string& prefix) const override {
+    return CachedTablesMetadataView(TablesMetadataView<true, RocksDBStorage>(this, prefix));
   }
 
   /** @copydoc Storage::DeleteColumnFamily */
@@ -766,25 +755,17 @@ class RocksDBStorage : public Storage {
     return Status();
   }
 
-  /** Returns a cell stream over all rows in the table. */
-  CellStream StreamTable(
-      std::string const& table_name
-  ) {
-    auto all_rows_set = std::make_shared<StringRangeSet>(StringRangeSet::All());
-    return StreamTable(table_name, all_rows_set);
-  }
-
   /**
    * Returns a cell stream over the table for the given row set.
    * @param table_name Table name.
    * @param range_set Row keys to include.
    * @param prefetch_all_columns If true, prefetch all columns per row.
    */
-  CellStream StreamTable(
+  virtual StatusOr<CellStream> StreamTable(
       std::string const& table_name,
       std::shared_ptr<StringRangeSet> range_set,
-      bool prefetch_all_columns = false
-  ) {
+      bool prefetch_all_columns
+  ) override {
     std::vector<std::unique_ptr<AbstractFamilyColumnStreamImpl>> iters;
     auto table = GetTable(table_name);
     auto const& m = table.value().table().column_families();

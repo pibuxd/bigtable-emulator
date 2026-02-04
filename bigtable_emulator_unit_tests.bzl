@@ -24,4 +24,5 @@ bigtable_emulator_unit_tests = [
     "table_test.cc",
     "persist/rocksdb/storage_test.cc",
     "cluster_test.cc",
+    "persist/memory/storage_test.cc",
 ]
