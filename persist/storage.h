@@ -66,7 +66,9 @@ class Storage {
  private:
   bool is_open_ = false;
  protected:
+   /** Concrete implementation should implement this to setup the storage engine. This function is guaranteed not to be double-invoked i.e it's eiter first call to this object or Close() was called before. The only argument is the list of extra column families that need to be loaded. */
    virtual Status UncheckedOpen(std::vector<std::string> additional_cf_names) = 0;
+   /** Concreate implementation should implement this to tear down the storage engine. Offers similar guarantee to UncheckedOpen(), you don't have to check if the double-close occurred in your implementation. */
    virtual Status UncheckedClose() = 0;
  public:
   /** Default constructor. */
@@ -119,12 +121,14 @@ class Storage {
   /** Returns a view of table metadata with keys starting with prefix. */
   virtual CachedTablesMetadataView Tables(const std::string& prefix) const = 0;
 
+  /** Streams all rows */
   virtual StatusOr<CellStream> StreamTableFull(
     std::string const& table_name
   ) {
     return this->StreamTable(table_name, false);
   }
 
+  /** Streams all rows  with optional prefetch settings */
   virtual StatusOr<CellStream> StreamTable(
       std::string const& table_name,
       bool prefetch_all_columns
@@ -135,6 +139,11 @@ class Storage {
 
   /**
   * Returns a cell stream over the table for the given row set.
+  * Note: prefetch_all_columns should fetch all columns for row in bulk.
+  *       This can be useful if your column sizes are small.
+  *       Usually false by default.
+  * Note: Specific implementation doesn't have to support prefetch_all_columns
+  *
   * @param table_name Table name.
   * @param range_set Row keys to include.
   * @param prefetch_all_columns If true, prefetch all columns per row.

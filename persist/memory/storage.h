@@ -50,7 +50,7 @@ namespace emulator {
 using google::protobuf::util::FieldMaskUtil;
 
 /**
- * RocksDB-backed storage implementation for the Bigtable emulator.
+ * Memory implementation does not offer any persistence. All the data is stored in hierarchy of classes. The top mapping is map<string, Table>.
  */
 class MemoryStorage : public Storage {
  private:
@@ -83,11 +83,10 @@ class MemoryStorage : public Storage {
       return std::make_tuple(el.first, meta);
     });
 
-    DBG("$$$$  PREFIXERR");
     if (prefix.size() > 0) {
       std::vector<std::tuple<std::string, storage::TableMeta>> tables_metas_filtered;
       std::copy_if (tables_metas.begin(), tables_metas.end(), std::back_inserter(tables_metas_filtered), [prefix](auto el) {
-        DBG(absl::StrCat("$$$$$ prefix ", std::get<0>(el), "|", prefix));
+        // Check if table has correct prefix
         return std::get<0>(el).rfind(prefix, 0) == 0;
       });
       std::swap(tables_metas_filtered, tables_metas);

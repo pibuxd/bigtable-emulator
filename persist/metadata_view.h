@@ -14,7 +14,10 @@ namespace cloud {
 namespace bigtable {
 namespace emulator {
 
-
+/**
+* This class represents cached list of tuples of tables' names and their metadata.
+* Should be returned by Tables() method in abstract class Storage()
+*/
 class CachedTablesMetadataView {
 public:
     using meta_t = std::tuple<std::string, storage::TableMeta>;
