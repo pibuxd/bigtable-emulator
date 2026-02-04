@@ -12,23 +12,32 @@ After running `./testing.sh`, this testing code runs, then the server starts. Yo
 
 ### Implementation
 
-Main implementation is in `persist/storage.h` and `persist/persisted_table.h`. 
-`PersistedTable` provides the table interface backed by RocksDB-persisted storage.
+Main implementation is in `persist/storage.h`. The storage class is abstract as well as the row transaction model.
+`PersistedTable` provides the table interface that can be supplied with any class implementing abstract `Storage` interface.
 
-RocksDB uses TransactionDB to have ACID guarantees. All mutation operations go through transactions.
+TODO: Below you have list of available implementations. Please look into those files and provide extra details. List should be changed into the table.
+We offer two implementations:
+* `persist/memory/storage.h` - thin-wrapper around pre-existing (non-persistent) in-memory class hierarchy implemented in `table.h`
+* `persist/rocksdb/storage.h` - RocksDB implementation that uses TransactionDB to have ACID guarantees. All mutation operations go through transactions.
 
 In `persist/proto.h` you have protobufs:
 * `StorageRocksDBConfig` - for storing server configuration (e.g. path to storage directory)
 * `TableMeta` - wrapper for table schema (might be useful in the future)
-* `RowData` - important stuff, here we serialize data
+* `RowData` - important, here we serialize data
 
-### How things are stored? 
+### MemoryStorage: How things are stored? 
 
-We have special column family called `"bte_metadata"` (hardcoded in line ~394 in `persist/storage.h` in `RocksDBStorage()` constructor).
+Data is stored within `Table` and `ColumnFamily` hierarchy of classes inside local fields (std::map with std::string keys) that use mutexes to control access flow.
+
+TODO: Describe hierary of composition of classes. For example in table.h in class Table there's field column_families_ mapping strings to ColumnFamily. In column_family.h you have class ColumnFamily mapping strings (rows_ field) into ColumnFamilyRow and so on. Provide this composition details here as table.
+
+### RocksDBStorage: How things are stored? 
+
+We have special column family called `"bte_metadata"` (configurable as many other parameters via `StorageRocksDBConfig`).
 This column family has keys (table names) and values (values of type `TableMeta` that is just protobuf wrapping `TableSchema` protobuf).
 That way we know what tables we have and what schemas they have.
 
-BT maps the data in the following way:
+BigTable maps the data in the following way:
 `val data: Map<(string, string, string, std::chrono::milliseconds), string>`
 The keys are:
 `data[column_family, row_key, column_qualifier, timestamp] = value`
@@ -37,29 +46,34 @@ Now in RocksDB we have column families, but we need to somehow map all the other
 
 Data is grouped in the following way:
 1. Column family corresponds to RocksDB column family (RocksDB's column family is just a group of key-value pairs)
-2. Row keys correspond to row keys in RocksDB
-3. For all the rest stuff we have protobuf that groups everything together (columns + timestamps)
+2. Tuple of row key, column qualifier and table name correspond to row keys in RocksDB
+3. For all the rest stuff we have protobuf that groups everything together (timestamps)
 
-So the data model looks like this:
+TODO: Please provide table describing this hierarchy mentioned above i.e how we store keys and value
 
-![Storage diagram](https://github.com/pibuxd/bigtable-emulator/blob/styczynski/rewrite-cleanup/static/storage_diagram.png)
+This way we can read only single row each time and efficiently stream through them.
 
 **IMPORTANT NOTE:** Protobufs does not preserve ordering of keys according to spec. In BT we have strict ordering of increasing timestamps (see `std::map<std::chrono::milliseconds, std::string, std::greater<>> cells_;` in `column_family.h`)
 This means that we need to do some suboptimal stuff in `storage.h`. To stream rows we need to construct iterator. As we group the data we load one row at a time - see `RocksDBStorageRowTX::LoadRow()`. When it happens we 
 need to map protobuf into C++ map to get correct ordering. I think this is avoidable somehow, but that kind of performance issue isn't our highest-priority concern right now.
+
+### Testing
+
+We provde different levels of abstraction for testing.
+TODO: Change this list into the table provide more details based on metnioned test files
+1. `persist/integration/read_test.cc` - integration test using CBT to perform operations
+2. `persist/memory/storage_test.cc` - storage interface testing for specific implementation
+3. `cluster_test.cc` - testing cluster interface operations for different storage implementations
+4. `server_test.cc` - testing server RPC handler for different storage implementations
 
 ### What's left for the future (TODO)?
 
 There are some things that can be added/improved:
 
 1. **Garbage collection** - Automatic deletion of old cell versions based on `gc_rule`. See `TODO` in code.
-2. **Configurable DB path** - Now path is hardcoded, could be done via env variable
-3. **Atomic schema updates** - ModifyColumnFamilies doesn't save changes to storage
-4. **Efficient bulk deletes** - DropRowRange could use RocksDB DeleteRange instead of iteration
-5. **Better CF management** - Drop/Create column families requires DB restart now
-
-All TODOs are marked as `TODO:` in source code.
-
+2. **Atomic schema updates** - ModifyColumnFamilies doesn't save changes to storage
+3. **Efficient bulk deletes** - DropRowRange could use RocksDB DeleteRange instead of iteration
+4. **Better CF management** - Drop/Create column families sometimes requires DB restart now. Should be easy to implement.
 
 ## About
 
