@@ -10,6 +10,16 @@
 #include <string>
 #include <vector>
 
+#include "server.h"
+
+#include "google/cloud/bigtable/admin/bigtable_table_admin_client.h"
+#include "google/cloud/credentials.h"
+#include "google/cloud/bigtable/resource_names.h"
+#include "google/cloud/bigtable/table.h"
+
+#include "fmt/format.h"
+#include "fmt/ranges.h"
+
 #define EXPECT_TABLE_NAMES_PREFIX(PREFIX, ...) \
   EXPECT_EQ((storage->Tables(PREFIX).names()), \
             (std::vector<std::string>{__VA_ARGS__}));
@@ -22,8 +32,31 @@
     }                             \
   };
 
+#define EXPECT_OK_STATUS(VALUE)   \
+  if (true) {                     \
+    auto v = (VALUE);             \
+    if (!v.ok()) {                \
+      EXPECT_EQ(fmt::format("{}", v.status()), "OK"); \
+    }                             \
+  };
+
 #define EXPECT_ROWS(MANAGER, TABLE_NAME, ...) \
   EXPECT_EQ(((MANAGER).getTableRowsDump(TABLE_NAME)), (rows_dump{__VA_ARGS__}));
+
+#define EXPECT_ROWS_CBT(TABLE, ...) \
+  if(true) { \
+    std::vector<std::pair<std::string,std::string>> dumped_rows; \
+    for (auto& row : (TABLE).ReadRows(cbt::RowRange::InfiniteRange(), cbt::Filter::PassAllFilter())) { \
+      EXPECT_OK_STATUS(row); \
+      for (cbt::Cell const& c : row->cells()) { \
+        dumped_rows.push_back(std::make_pair(fmt::format("{}.{}.{}", c.family_name(), c.row_key(), c.column_qualifier()), c.value())); \
+      } \
+    } \
+    EXPECT_EQ(dumped_rows, (std::vector<std::pair<std::string,std::string>>{__VA_ARGS__})); \
+  }
+
+#define WAIT() \
+  std::this_thread::sleep_for(std::chrono::milliseconds(250));
 
 #define TXN(STORAGE, ...) \
   ([&]() -> auto { \
@@ -44,6 +77,68 @@ using rows_dump = std::vector<
     std::tuple<std::string, std::chrono::milliseconds, std::string>>;
 
 template <typename StorageT>
+class StorageTestManager;
+
+namespace cbt = ::google::cloud::bigtable;
+namespace cbta = ::google::cloud::bigtable_admin;
+
+template <typename StorageT>
+class StorageTestManager;
+
+class IntegrationServer {
+  template <typename StorageT> friend class StorageTestManager;
+  private:
+    std::shared_ptr<Storage> storage_;
+    uint16_t port_;
+    std::string host_;
+    std::unique_ptr<EmulatorServer> emulator_;
+    std::thread worker_;
+    bool active_ = true;
+
+    explicit IntegrationServer(size_t test_uid, std::shared_ptr<Storage> storage) : port_(8080 + test_uid), host_("0.0.0.0"), storage_(std::move(storage)) {
+      auto maybe_emulator = google::cloud::bigtable::emulator::CreateDefaultEmulatorServer(
+        host_, port_, storage_);
+      assert(maybe_emulator.ok());
+      emulator_ = std::move(maybe_emulator.value());
+      worker_ = std::move(std::thread([&](){
+        this->emulator_->Wait();
+      }));
+    }
+
+    Options getClientOptions() {
+      return Options{} \
+        .set<EndpointOption>(fmt::format("{}:{}", host_, port_)) \
+        .set<LoggingComponentsOption>(std::set<std::string>{"rpc", "rpc-streams", "auth"}) \
+        .set<UnifiedCredentialsOption>(MakeInsecureCredentials());
+    }
+
+  public:
+
+    void Kill() {
+      if (!active_) {
+        return;
+      }
+      this->emulator_->Shutdown();
+      worker_.join();
+      active_ = false;
+    }
+
+    ~IntegrationServer() {
+      Kill();
+    };
+
+    cbt::Table Table(std::string project_id, std::string instance_id, std::string table_id) {
+      return cbt::Table(cbt::MakeDataConnection(getClientOptions()), cbt::TableResource(std::move(project_id), std::move(instance_id), std::move(table_id)));
+    }
+
+    cbta::BigtableTableAdminClient Client() {
+      return (
+        cbta::BigtableTableAdminClient (cbta::MakeBigtableTableAdminConnection(getClientOptions()))
+      );
+    }
+};
+
+template <typename StorageT>
 class StorageTestManager {
  private:
   std::shared_ptr<StorageT> storage;
@@ -62,6 +157,10 @@ class StorageTestManager {
 
   inline std::string testTableName(std::string const& name) const {
     return absl::StrCat(testTablePrefix(), "/tables/", name);
+  }
+  
+  inline IntegrationServer RunServer() {
+    return IntegrationServer(test_table_uid, storage);
   }
 
   inline rows_dump getTableRowsDump(std::string const& table_name) {

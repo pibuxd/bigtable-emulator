@@ -26,4 +26,5 @@ bigtable_emulator_unit_tests = [
     "cluster_test.cc",
     "persist/memory/storage_test.cc",
     "server_test.cc",
+    "persist/integration/read_test.cc",
 ]
