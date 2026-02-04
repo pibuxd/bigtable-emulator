@@ -1,37 +1,37 @@
 # Single node, Persistent Emulator for Google Bigtable
 
-## 15 Jan 26' update
-
-In `testing.sh` you have full debug command that uses `/tmp/rocksdb-for-bigtable-test4` as storage path (path is hardcoded in `persist/storage.h` in line ~392 in `RocksDBStorage()` constructor, you can change it if you want).
-
-Now RocksDB closes and opens properly, so you can safely run the emulator multiple times and data will persist between restarts (it's persistent!).
-
-You can just run `./testing.sh`
-In `persist/example.h` you have some code that executes on server startup - this was for testing during implementation. Now you can ignore it or delete it.
-After running `./testing.sh`, this testing code runs, then the server starts. You can kill it or send some requests (see "Connecting to the Emulator" section).
+## Persistent storage patch
 
 ### Implementation
 
 Main implementation is in `persist/storage.h`. The storage class is abstract as well as the row transaction model.
 `PersistedTable` provides the table interface that can be supplied with any class implementing abstract `Storage` interface.
 
-TODO: Below you have list of available implementations. Please look into those files and provide extra details. List should be changed into the table.
-We offer two implementations:
-* `persist/memory/storage.h` - thin-wrapper around pre-existing (non-persistent) in-memory class hierarchy implemented in `table.h`
-* `persist/rocksdb/storage.h` - RocksDB implementation that uses TransactionDB to have ACID guarantees. All mutation operations go through transactions.
+| Implementation   | Path                         | Description |
+|------------------|------------------------------|-------------|
+| **MemoryStorage** | `persist/memory/storage.h`   | Thin wrapper around the pre-existing (non-persistent) in-memory class hierarchy in `table.h`. No persistence; data lives in `std::map` structures with mutexes. Top-level mapping: `map<string, Table>`. |
+| **RocksDBStorage** | `persist/rocksdb/storage.h` | Uses RocksDB `TransactionDB` for ACID guarantees. All mutation operations go through transactions. Table metadata is stored in a dedicated RocksDB column family (e.g. `bte_metadata`). |
 
-In `persist/proto.h` you have protobufs:
-* `StorageRocksDBConfig` - for storing server configuration (e.g. path to storage directory)
-* `TableMeta` - wrapper for table schema (might be useful in the future)
-* `RowData` - important, here we serialize data
+Protobuf definitions live in `persist/proto/storage.proto` (generated headers: `persist/proto/storage.pb.h`):
 
-### MemoryStorage: How things are stored? 
+| Message                  | Purpose |
+|--------------------------|---------|
+| `StorageRocksDBConfig`   | Server/storage configuration (e.g. `db_path`, `meta_column_family`). |
+| `TableMeta`              | Wrapper for table schema (`google.bigtable.admin.v2.Table`); used for metadata. |
+| `RowData`                | Serialization of row cell data; contains `RowColumnData` (map of timestamp → value) per column. |
 
-Data is stored within `Table` and `ColumnFamily` hierarchy of classes inside local fields (std::map with std::string keys) that use mutexes to control access flow.
+### MemoryStorage: how data is stored 
 
-TODO: Describe hierary of composition of classes. For example in table.h in class Table there's field column_families_ mapping strings to ColumnFamily. In column_family.h you have class ColumnFamily mapping strings (rows_ field) into ColumnFamilyRow and so on. Provide this composition details here as table.
+Data is stored within the `Table` and `ColumnFamily` hierarchy of classes in local fields (`std::map` with `std::string` keys) protected by mutexes.
 
-### RocksDBStorage: How things are stored? 
+| Level | Class             | File            | Field              | Maps |
+|-------|-------------------|-----------------|--------------------|------|
+| 1     | `Table`           | `table.h`       | `column_families_` | column family name → `std::shared_ptr<ColumnFamily>` |
+| 2     | `ColumnFamily`    | `column_family.h` | `rows_`          | row key → `ColumnFamilyRow` |
+| 3     | `ColumnFamilyRow` | `column_family.h` | `columns_`       | column qualifier → `ColumnRow` |
+| 4     | `ColumnRow`       | `column_family.h` | `cells_`         | timestamp (`std::chrono::milliseconds`) → value (`std::string`); ordered by timestamp descending (`std::greater<>`). |
+
+### RocksDBStorage: how data is stored 
 
 We have special column family called `"bte_metadata"` (configurable as many other parameters via `StorageRocksDBConfig`).
 This column family has keys (table names) and values (values of type `TableMeta` that is just protobuf wrapping `TableSchema` protobuf).
@@ -44,27 +44,31 @@ The keys are:
 
 Now in RocksDB we have column families, but we need to somehow map all the other keys.
 
-Data is grouped in the following way:
-1. Column family corresponds to RocksDB column family (RocksDB's column family is just a group of key-value pairs)
-2. Tuple of row key, column qualifier and table name correspond to row keys in RocksDB
-3. For all the rest stuff we have protobuf that groups everything together (timestamps)
+Data is grouped as follows:
 
-TODO: Please provide table describing this hierarchy mentioned above i.e how we store keys and value
+| RocksDB level        | Key (RocksDB key)                    | Value (RocksDB value) |
+|----------------------|--------------------------------------|------------------------|
+| Metadata CF (e.g. `bte_metadata`) | Table name (string)                  | Serialized `TableMeta` (table schema). |
+| Data CF (one per Bigtable column family) | `table_name \| row_key \| column_qualifier` | Serialized `RowData` (contains `RowColumnData`: map of timestamp_ms → value for that (row, column)). |
 
-This way we can read only single row each time and efficiently stream through them.
+So: Bigtable column family → RocksDB column family; (table, row, column_qualifier) → one RocksDB key; all timestamps for that (row, column) are stored in the single `RowData` protobuf value.
 
-**IMPORTANT NOTE:** Protobufs does not preserve ordering of keys according to spec. In BT we have strict ordering of increasing timestamps (see `std::map<std::chrono::milliseconds, std::string, std::greater<>> cells_;` in `column_family.h`)
+This layout lets us read a single row at a time and stream through rows efficiently.
+
+**IMPORTANT NOTE:** Protobuf `map<>` does not preserve key ordering according to the spec. In BT we have strict ordering of increasing timestamps (see `std::map<std::chrono::milliseconds, std::string, std::greater<>> cells_;` in `column_family.h`)
 This means that we need to do some suboptimal stuff in `storage.h`. To stream rows we need to construct iterator. As we group the data we load one row at a time - see `RocksDBStorageRowTX::LoadRow()`. When it happens we 
 need to map protobuf into C++ map to get correct ordering. I think this is avoidable somehow, but that kind of performance issue isn't our highest-priority concern right now.
 
 ### Testing
 
-We provde different levels of abstraction for testing.
-TODO: Change this list into the table provide more details based on metnioned test files
-1. `persist/integration/read_test.cc` - integration test using CBT to perform operations
-2. `persist/memory/storage_test.cc` - storage interface testing for specific implementation
-3. `cluster_test.cc` - testing cluster interface operations for different storage implementations
-4. `server_test.cc` - testing server RPC handler for different storage implementations
+We provide several levels of testing:
+
+| Test file                           | Level        | Storage      | Description |
+|-------------------------------------|--------------|--------------|-------------|
+| `persist/integration/read_test.cc`  | Integration  | RocksDB      | Uses the CBT client: creates a table, applies mutations, reads rows, and verifies data persists across restarts. |
+| `persist/memory/storage_test.cc`    | Unit         | MemoryStorage| Exercises the `Storage` interface: CreateTable, row transactions, SetCell, DeleteRowColumn, DeleteRowFromColumnFamily, etc. |
+| `cluster_test.cc`                   | Unit         | RocksDB      | Cluster API: CreateTable, ListTables, GetTable, mutations, CheckAndMutateRow for a given storage backend. |
+| `server_test.cc`                   | Unit         | RocksDB      | Server RPC layer: gRPC Bigtable and BigtableTableAdmin stubs against an in-process emulator server. |
 
 ### What's left for the future (TODO)?
 
@@ -149,7 +153,7 @@ cbt read my-table  # data is still there
 
 ## Using RocksDB
 
-Example in `server.cc` and `persist/storage.h`
+See `server.cc` for wiring RocksDB storage into the emulator and `persist/storage.h` for the abstract storage interface.
 
 ## `compile_commands.json`
 
@@ -170,15 +174,8 @@ Note that the cache directory grows indefinitely.
 ### Formatting the code
 
 ```bash
-# On bash you neet to enable globstar with `shopt -s globstar` first
+# On bash you need to enable globstar with `shopt -s globstar` first
 clang-format -i -style=file -assume-filename=.clang-format **/*.cc **/*.h
-```
-
-### `compile_commands.json`
-
-If you need to generate `compile_commands.json` for your tooling, run:
-```shell
-bazel run --config=compile-commands
 ```
 
 ## Contributing changes
