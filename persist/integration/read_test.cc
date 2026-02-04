@@ -23,7 +23,7 @@ namespace {
 
 // CBT integration test
 TEST(IntegrationTest, Read) {
-  MemoryStorageTestManager m;
+  RocksDBStorageTestManager m;
   auto server = m.RunServer();
   auto client = server.Client();
 
@@ -47,14 +47,6 @@ TEST(IntegrationTest, Read) {
   }
 
   WAIT();
-
-  std::vector<std::string> dumped_rows;
-  for (auto& row : table.ReadRows(cbt::RowRange::InfiniteRange(), cbt::Filter::PassAllFilter())) {
-    EXPECT_OK_STATUS(row);
-    for (cbt::Cell const& c : row->cells()) {
-      dumped_rows.push_back(fmt::format("{}.{}.{}={}", c.family_name(), c.column_qualifier(), c.row_key(), c.value()));
-    }
-  }
 
   EXPECT_ROWS_CBT(table, {"fam.key-0.c0", "Hello World!"}, {"fam.key-1.c0", "Hello Cloud Bigtable!"}, {"fam.key-2.c0", "Hello C++!"});
 
