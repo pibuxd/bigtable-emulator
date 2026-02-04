@@ -23,22 +23,28 @@
 #include "row_streamer.h"
 #include "google/cloud/status.h"
 #include "google/cloud/status_or.h"
+#include "absl/types/optional.h"
 #include "absl/types/variant.h"
+#include "column_family.h"
+#include "filter.h"
 #include "google/protobuf/repeated_ptr_field.h"
+#include "range_set.h"
+#include "row_streamer.h"
 #include <google/bigtable/admin/v2/bigtable_table_admin.pb.h>
 #include <google/bigtable/admin/v2/table.pb.h>
 #include <google/bigtable/v2/bigtable.pb.h>
 #include <google/bigtable/v2/data.pb.h>
 #include <google/protobuf/field_mask.pb.h>
-#include "absl/types/optional.h"
 #include <grpcpp/support/sync_stream.h>
 #include <chrono>
+#include <condition_variable>
 #include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <stack>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -52,6 +58,19 @@ class MemoryStorageRowTX;
 /// Objects of this class represent Bigtable tables.
 class Table : public std::enable_shared_from_this<Table> {
  public:
+  ~Table() {
+    // Signal the GC thread to stop and wait for it to terminate.
+    {
+      std::unique_lock<std::mutex> lock(gc_mtx_);
+      stop_flag_ = true;
+    }
+    cv_.notify_one();
+
+    if (gc_thread_.joinable()) {
+      gc_thread_.join();
+    }
+  }
+
   static StatusOr<std::shared_ptr<Table>> Create(
       google::bigtable::admin::v2::Table schema);
 
@@ -108,6 +127,21 @@ class Table : public std::enable_shared_from_this<Table> {
   Status DropRowRange(
       ::google::bigtable::admin::v2::DropRowRangeRequest const& request);
 
+  // Runs GC for each of the column families. It takes the table lock
+  // at the beginning and only releases when GC for the last column
+  // family is completed.
+  Status RunGC() {
+    std::lock_guard<std::mutex> lock(mu_);
+
+    for (auto& cf : column_families_) {
+      cf.second->RunGC();
+    }
+
+    return Status();
+  }
+
+  void StartGCThreadOnce();
+
  private:
   Table() = default;
   friend class RowSetIterator;
@@ -129,6 +163,16 @@ class Table : public std::enable_shared_from_this<Table> {
   mutable std::mutex mu_;
   google::bigtable::admin::v2::Table schema_;
   std::map<std::string, std::shared_ptr<ColumnFamily>> column_families_;
+
+  // Support for starting at most one GC thread and for signaling it
+  // to stop.
+  std::once_flag start_gc_once_flag_;
+  std::atomic<bool> stop_flag_{false};
+  std::mutex gc_mtx_;
+  std::condition_variable cv_;
+  std::thread gc_thread_;
+
+  void StartGCThread();
 };
 
 struct RestoreValue {
