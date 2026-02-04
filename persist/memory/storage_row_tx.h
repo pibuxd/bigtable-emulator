@@ -6,9 +6,9 @@
 #ifndef GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_MEMORY_STORAGE_ROW_TX_H
 #define GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_MEMORY_STORAGE_ROW_TX_H
 
-#include "table.h"
-#include "persist/storage_row_tx.h"
 #include "persist/proto/storage.pb.h"
+#include "persist/storage_row_tx.h"
+#include "table.h"
 #include <map>
 #include <string>
 #include <tuple>
@@ -28,6 +28,7 @@ class MemoryStorage;
  */
 class MemoryStorageRowTX : public StorageRowTX {
   friend class MemoryStorage;
+
  public:
   /** Destroys the transaction (rolls back if not committed). */
   virtual ~MemoryStorageRowTX();
@@ -39,45 +40,39 @@ class MemoryStorageRowTX : public StorageRowTX {
   virtual Status Rollback(Status status) override;
 
   /** @copydoc StorageRowTX::SetCell */
-  virtual Status SetCell(
-      std::string const& column_family,
-      std::string const& column_qualifier,
-      std::chrono::milliseconds timestamp,
-      std::string const& value
-  ) override;
+  virtual Status SetCell(std::string const& column_family,
+                         std::string const& column_qualifier,
+                         std::chrono::milliseconds timestamp,
+                         std::string const& value) override;
 
   /** @copydoc StorageRowTX::UpdateCell */
   virtual StatusOr<absl::optional<std::string>> UpdateCell(
-      std::string const& column_family,
-      std::string const& column_qualifier,
-      std::chrono::milliseconds timestamp,
-      std::string& value,
-      std::function<StatusOr<std::string>(std::string const&, std::string&&)> const& update_fn
-  ) override;
+      std::string const& column_family, std::string const& column_qualifier,
+      std::chrono::milliseconds timestamp, std::string& value,
+      std::function<StatusOr<std::string>(
+          std::string const&, std::string&&)> const& update_fn) override;
 
   /** @copydoc StorageRowTX::DeleteRowColumn */
   virtual Status DeleteRowColumn(
-      std::string const& column_family,
-      std::string const& column_qualifier,
-      ::google::bigtable::v2::TimestampRange const& time_range
-  ) override;
+      std::string const& column_family, std::string const& column_qualifier,
+      ::google::bigtable::v2::TimestampRange const& time_range) override;
 
   /** @copydoc StorageRowTX::DeleteRowFromAllColumnFamilies */
   virtual Status DeleteRowFromAllColumnFamilies() override;
 
   /** @copydoc StorageRowTX::DeleteRowFromColumnFamily */
   virtual Status DeleteRowFromColumnFamily(
-      std::string const& column_family
-  ) override;
+      std::string const& column_family) override;
 
  private:
-  const std::string row_key_;    /**< Row key for this transaction. */
-  const std::string table_name_; /**< Table name for this transaction. */
-  MemoryStorage* db_;           /**< Backing in-memory storage. */
+  std::string const row_key_;    /**< Row key for this transaction. */
+  std::string const table_name_; /**< Table name for this transaction. */
+  MemoryStorage* db_;            /**< Backing in-memory storage. */
   std::shared_ptr<Table> table_; /**< Table instance being mutated. */
 
   bool committed_; /**< True after Commit(); used to skip undo on destruct. */
-  std::stack<absl::variant<DeleteValue, RestoreValue>> undo_; /**< Undo log for rollback. */
+  std::stack<absl::variant<DeleteValue, RestoreValue>>
+      undo_; /**< Undo log for rollback. */
 
   /** Replays the undo stack to restore state (used on rollback). */
   void Undo();
@@ -89,12 +84,9 @@ class MemoryStorageRowTX : public StorageRowTX {
    * @param db Pointer to backing MemoryStorage.
    * @param table Shared pointer to the Table instance.
    */
-  explicit MemoryStorageRowTX(
-      const std::string table_name,
-      const std::string row_key,
-      MemoryStorage* db,
-      std::shared_ptr<Table> table
-  );
+  explicit MemoryStorageRowTX(std::string const table_name,
+                              std::string const row_key, MemoryStorage* db,
+                              std::shared_ptr<Table> table);
 };
 
 }  // namespace emulator

@@ -1,29 +1,30 @@
 /**
  * @file persisted_table.h
- * @brief Table interface backed by RocksDB-persisted storage for the Bigtable emulator.
+ * @brief Table interface backed by RocksDB-persisted storage for the Bigtable
+ * emulator.
  */
 
 #ifndef GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_PERSISTED_TABLE_H
 #define GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_PERSISTED_TABLE_H
 
-#include "persist/storage.h"
-#include "column_family.h"
-#include "limits.h"
-#include "filter.h"
-#include "range_set.h"
-#include "row_streamer.h"
+#include "google/cloud/internal/big_endian.h"
 #include "google/cloud/status.h"
 #include "google/cloud/status_or.h"
-#include "google/cloud/internal/big_endian.h"
+#include "absl/types/optional.h"
 #include "absl/types/variant.h"
+#include "column_family.h"
+#include "filter.h"
 #include "google/protobuf/repeated_ptr_field.h"
 #include "google/protobuf/util/field_mask_util.h"
+#include "limits.h"
+#include "persist/storage.h"
+#include "range_set.h"
+#include "row_streamer.h"
 #include <google/bigtable/admin/v2/bigtable_table_admin.pb.h>
 #include <google/bigtable/admin/v2/table.pb.h>
 #include <google/bigtable/v2/bigtable.pb.h>
 #include <google/bigtable/v2/data.pb.h>
 #include <google/protobuf/field_mask.pb.h>
-#include "absl/types/optional.h"
 #include <grpcpp/support/sync_stream.h>
 #include <chrono>
 #include <functional>
@@ -43,7 +44,8 @@ namespace emulator {
 /**
  * Converts a Bigtable RowSet proto into a StringRangeSet for row iteration.
  *
- * @param row_set The RowSet containing row keys and row ranges from the request.
+ * @param row_set The RowSet containing row keys and row ranges from the
+ * request.
  * @return The constructed StringRangeSet or an error if validation fails.
  */
 StatusOr<StringRangeSet> CreateStringRangeSet(
@@ -80,8 +82,7 @@ class PersistedTable {
    * @param name Table name in the form /projects/{}/instances/{}/tables/{}.
    * @param storage Shared pointer to the RocksDB storage backend.
    */
-  PersistedTable(std::string const& name,
-                 std::shared_ptr<Storage> storage);
+  PersistedTable(std::string const& name, std::shared_ptr<Storage> storage);
 
   /**
    * Applies mutations to a single row atomically.

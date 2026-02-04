@@ -13,9 +13,9 @@
 // limitations under the License.
 
 #include "persist/rocksdb/column_family_stream.h"
+#include "absl/strings/str_cat.h"
 #include "persist/rocksdb/storage.h"
 #include "persist/storage.h"
-#include "absl/strings/str_cat.h"
 #include <cassert>
 
 namespace google {
@@ -23,18 +23,12 @@ namespace cloud {
 namespace bigtable {
 namespace emulator {
 
-RocksDBColumnFamilyStream::~RocksDBColumnFamilyStream() {
-  delete row_iter_;
-}
+RocksDBColumnFamilyStream::~RocksDBColumnFamilyStream() { delete row_iter_; }
 
 RocksDBColumnFamilyStream::RocksDBColumnFamilyStream(
-    std::string const& column_family_name,
-    rocksdb::ColumnFamilyHandle* handle,
-    std::shared_ptr<StringRangeSet const> row_set,
-    RocksDBStorage* db,
-    const std::string table_name,
-    const bool prefetch_all_columns
-)
+    std::string const& column_family_name, rocksdb::ColumnFamilyHandle* handle,
+    std::shared_ptr<StringRangeSet const> row_set, RocksDBStorage* db,
+    std::string const table_name, bool const prefetch_all_columns)
     : column_family_name_(column_family_name),
       handle_(handle),
       row_ranges_(std::move(row_set)),
@@ -56,9 +50,9 @@ bool RocksDBColumnFamilyStream::HasValue() const {
 CellView const& RocksDBColumnFamilyStream::Value() const {
   InitializeIfNeeded();
   if (!cur_value_) {
-    cur_value_ = CellView(row_key_, column_family_name_,
-                          column_it_.value()->first, cell_it_.value()->first,
-                          cell_it_.value()->second);
+    cur_value_ =
+        CellView(row_key_, column_family_name_, column_it_.value()->first,
+                 cell_it_.value()->first, cell_it_.value()->second);
   }
   return cur_value_.value();
 }
@@ -70,7 +64,8 @@ void RocksDBColumnFamilyStream::NextRow() const {
     if (!ranges.empty()) {
       auto const& first_range = *ranges.begin();
       if (absl::holds_alternative<std::string>(first_range.start())) {
-        db_->RawDataSeekPrefixed(row_iter_, table_name_, absl::get<std::string>(first_range.start()));
+        db_->RawDataSeekPrefixed(row_iter_, table_name_,
+                                 absl::get<std::string>(first_range.start()));
       } else {
         row_iter_->SeekToFirst();
       }
@@ -81,8 +76,10 @@ void RocksDBColumnFamilyStream::NextRow() const {
 
   DBG("RocksDBColumnFamilyStream:NextRow while loop");
   while (row_iter_->Valid()) {
-    const auto [table_name, row_key, column_qualifier] = db_->RawDataParseRowKey(row_iter_);
-    DBG(absl::StrCat("RocksDBColumnFamilyStream:NextRow table_name=", table_name, " key=", row_key));
+    auto const [table_name, row_key, column_qualifier] =
+        db_->RawDataParseRowKey(row_iter_);
+    DBG(absl::StrCat("RocksDBColumnFamilyStream:NextRow table_name=",
+                     table_name, " key=", row_key));
     if (table_name != table_name_) {
       break;
     }
@@ -100,8 +97,10 @@ void RocksDBColumnFamilyStream::NextRow() const {
       auto data = TColumnFamilyRow();
       DBG("RocksDBColumnFamilyStream:NextRow collecting columns");
       while (row_iter_->Valid()) {
-        const auto [c_table_name, c_row_key, c_column_qualifier] = db_->RawDataParseRowKey(row_iter_);
-        DBG(absl::StrCat("RocksDBColumnFamilyStream:NextRow column=", c_column_qualifier));
+        auto const [c_table_name, c_row_key, c_column_qualifier] =
+            db_->RawDataParseRowKey(row_iter_);
+        DBG(absl::StrCat("RocksDBColumnFamilyStream:NextRow column=",
+                         c_column_qualifier));
         if (c_table_name != table_name_ || c_row_key != row_key_) {
           break;
         }
@@ -111,7 +110,8 @@ void RocksDBColumnFamilyStream::NextRow() const {
           return;
         }
         for (auto const& i : maybe_row.value().column().cells()) {
-          data[c_column_qualifier][std::chrono::milliseconds(i.first)] = i.second;
+          data[c_column_qualifier][std::chrono::milliseconds(i.first)] =
+              i.second;
         }
         row_iter_->Next();
         if (!prefetch_all_columns_) {
@@ -120,7 +120,8 @@ void RocksDBColumnFamilyStream::NextRow() const {
       }
       DBG("RocksDBColumnFamilyStream:NextRow done collection");
       for (auto i : data) {
-        DBG(absl::StrCat("RocksDBColumnFamilyStream:NextRow collected ", i.first));
+        DBG(absl::StrCat("RocksDBColumnFamilyStream:NextRow collected ",
+                         i.first));
       }
       row_data_ = std::move(data);
       row_key_ = row_key;
@@ -203,10 +204,11 @@ bool RocksDBColumnFamilyStream::PointToFirstCellAfterColumnChange() const {
 bool RocksDBColumnFamilyStream::PointToFirstCellAfterRowChange() const {
   DBG("RocksDBColumnFamilyStream:PointToFirstCellAfterRowChange executing");
   for (; row_data_.has_value(); NextRow()) {
-    columns_ = RegexFiteredMapView<StringRangeFilteredMapView<TColumnFamilyRow>>(
-        StringRangeFilteredMapView<TColumnFamilyRow>(row_data_.value(),
-                                                    column_ranges_),
-        column_regexes_);
+    columns_ =
+        RegexFiteredMapView<StringRangeFilteredMapView<TColumnFamilyRow>>(
+            StringRangeFilteredMapView<TColumnFamilyRow>(row_data_.value(),
+                                                         column_ranges_),
+            column_regexes_);
     column_it_ = columns_.value().begin();
     if (PointToFirstCellAfterColumnChange()) {
       return true;

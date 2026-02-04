@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 #include "persist/rocksdb/storage.h"
 #include "persist/test_utils.h"
 
@@ -21,12 +20,12 @@ namespace cloud {
 namespace bigtable {
 namespace emulator {
 namespace {
-  
+
 TEST(RocksDBStorage, CreateTableBasicRestart) {
   RocksDBStorageTestManager m;
   auto storage = m.getStorage();
 
-  const auto table_name = m.createTestTable();
+  auto const table_name = m.createTestTable();
   // Verify all table was created
   EXPECT_TABLE_NAMES_PREFIX(m.testTablePrefix(), table_name);
 
@@ -41,11 +40,11 @@ TEST(RocksDBStorage, TableRowsRead) {
   RocksDBStorageTestManager m;
   auto storage = m.getStorage();
 
-  const auto table_name1 = m.createTestTable({ "cf_1" });
-  const auto table_name2 = m.createTestTable({ "cf_1" });
+  auto const table_name1 = m.createTestTable({"cf_1"});
+  auto const table_name2 = m.createTestTable({"cf_1"});
   EXPECT_TABLE_NAMES_PREFIX(m.testTablePrefix(), table_name1, table_name2);
 
-  const auto write_tx = storage->RowTransaction(table_name1, "row_1");
+  auto const write_tx = storage->RowTransaction(table_name1, "row_1");
   auto t = m.now();
   auto t1 = t++;
   EXPECT_OK(write_tx->SetCell("cf_1", "col_1", t1, "value_1"));
@@ -55,7 +54,7 @@ TEST(RocksDBStorage, TableRowsRead) {
   EXPECT_ROWS(m, table_name1, {"cf_1.row_1.col_1", t1, "value_1"});
   EXPECT_ROWS(m, table_name2);
 
-  const auto write_tx2 = storage->RowTransaction(table_name2, "row_1");
+  auto const write_tx2 = storage->RowTransaction(table_name2, "row_1");
   auto t2 = t++;
   EXPECT_OK(write_tx2->SetCell("cf_1", "col_1", t1, "value_2a"));
   EXPECT_OK(write_tx2->SetCell("cf_1", "col_1", t2, "value_2b"));
@@ -64,17 +63,19 @@ TEST(RocksDBStorage, TableRowsRead) {
 
   // Verify that we have new rows
   EXPECT_ROWS(m, table_name1, {"cf_1.row_1.col_1", t1, "value_1"});
-  EXPECT_ROWS(m, table_name2, {"cf_1.row_1.col_1", t1, "value_2a"}, {"cf_1.row_1.col_1", t2, "value_2b"},{"cf_1.row_1.col_2", t2, "value_3"});
+  EXPECT_ROWS(m, table_name2, {"cf_1.row_1.col_1", t1, "value_2a"},
+              {"cf_1.row_1.col_1", t2, "value_2b"},
+              {"cf_1.row_1.col_2", t2, "value_3"});
 
   auto t3 = t++;
-  const auto del_tx3 = storage->RowTransaction(table_name2, "row_1");
+  auto const del_tx3 = storage->RowTransaction(table_name2, "row_1");
   EXPECT_OK(del_tx3->DeleteRowColumn("cf_1", "col_1", t1, t3));
   EXPECT_OK(del_tx3->Commit());
 
   EXPECT_ROWS(m, table_name2, {"cf_1.row_1.col_2", t2, "value_3"});
 
   // We delete entire row
-  const auto del_tx4 = storage->RowTransaction(table_name2, "row_1");
+  auto const del_tx4 = storage->RowTransaction(table_name2, "row_1");
   del_tx4->DeleteRowFromColumnFamily("cf_1");
   del_tx4->Commit();
 
@@ -83,19 +84,18 @@ TEST(RocksDBStorage, TableRowsRead) {
   EXPECT_ROWS(m, table_name1, {"cf_1.row_1.col_1", t1, "value_1"});
 
   // Empty second table as well
-  const auto del_tx5 = storage->RowTransaction(table_name1, "row_1");
+  auto const del_tx5 = storage->RowTransaction(table_name1, "row_1");
   del_tx5->DeleteRowFromAllColumnFamilies();
   del_tx5->Commit();
   EXPECT_ROWS(m, table_name1);
-
 }
 
 TEST(RocksDBStorage, TableManyRowsDeleteFromAllColumnFamilies) {
   RocksDBStorageTestManager m;
   auto storage = m.getStorage();
 
-  const auto table_name1 = m.createTestTable({ "cf_1", "cf_2", "cf_3" });
-  const auto write_tx = storage->RowTransaction(table_name1, "row_1");
+  auto const table_name1 = m.createTestTable({"cf_1", "cf_2", "cf_3"});
+  auto const write_tx = storage->RowTransaction(table_name1, "row_1");
   auto t = m.now();
   auto t1 = t++;
   EXPECT_OK(write_tx->SetCell("cf_1", "col_1", t1, "value_1"));
@@ -105,18 +105,21 @@ TEST(RocksDBStorage, TableManyRowsDeleteFromAllColumnFamilies) {
   EXPECT_OK(write_tx->SetCell("cf_3", "col_2", t1, "value_5"));
   EXPECT_OK(write_tx->Commit());
 
-  const auto write_tx2 = storage->RowTransaction(table_name1, "row_2");
+  auto const write_tx2 = storage->RowTransaction(table_name1, "row_2");
   EXPECT_OK(write_tx2->SetCell("cf_3", "col_1", t1, "value_6"));
   EXPECT_OK(write_tx2->Commit());
 
-  EXPECT_ROWS(m, table_name1, {"cf_1.row_1.col_1", t1, "value_1"}, {"cf_1.row_1.col_4", t1, "value_4"},{"cf_2.row_1.col_2", t1, "value_2"}, {"cf_3.row_1.col_2", t1, "value_5"}, {"cf_3.row_1.col_3", t1, "value_3"}, {"cf_3.row_2.col_1", t1, "value_6"});
+  EXPECT_ROWS(
+      m, table_name1, {"cf_1.row_1.col_1", t1, "value_1"},
+      {"cf_1.row_1.col_4", t1, "value_4"}, {"cf_2.row_1.col_2", t1, "value_2"},
+      {"cf_3.row_1.col_2", t1, "value_5"}, {"cf_3.row_1.col_3", t1, "value_3"},
+      {"cf_3.row_2.col_1", t1, "value_6"});
 
-  const auto del_tx = storage->RowTransaction(table_name1, "row_1");
+  auto const del_tx = storage->RowTransaction(table_name1, "row_1");
   del_tx->DeleteRowFromAllColumnFamilies();
   del_tx->Commit();
   EXPECT_ROWS(m, table_name1, {"cf_3.row_2.col_1", t1, "value_6"});
 }
-
 
 }  // anonymous namespace
 }  // namespace emulator

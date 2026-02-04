@@ -13,9 +13,9 @@
 // limitations under the License.
 
 #include "persist/rocksdb/storage_row_tx.h"
+#include "absl/strings/str_cat.h"
 #include "persist/rocksdb/storage.h"
 #include "persist/storage.h"
-#include "absl/strings/str_cat.h"
 #include <cassert>
 
 namespace google {
@@ -33,7 +33,7 @@ RocksDBStorageRowTX::~RocksDBStorageRowTX() {
 }
 
 Status RocksDBStorageRowTX::Rollback(Status status) {
-  const auto txn_status = txn_->Rollback();
+  auto const txn_status = txn_->Rollback();
   assert(txn_status.ok());
   delete txn_;
   txn_ = nullptr;
@@ -43,44 +43,45 @@ Status RocksDBStorageRowTX::Rollback(Status status) {
   return Status();
 }
 
-RocksDBStorageRowTX::RocksDBStorageRowTX(
-    const std::string table_name,
-    const std::string row_key,
-    rocksdb::Transaction* txn,
-    RocksDBStorage* db
-) : table_name_(std::move(table_name)), row_key_(std::move(row_key)), txn_(txn), roptions_(), db_(db) {}
+RocksDBStorageRowTX::RocksDBStorageRowTX(std::string const table_name,
+                                         std::string const row_key,
+                                         rocksdb::Transaction* txn,
+                                         RocksDBStorage* db)
+    : table_name_(std::move(table_name)),
+      row_key_(std::move(row_key)),
+      txn_(txn),
+      roptions_(),
+      db_(db) {}
 
-void RocksDBStorageRowTX::lazyRowDataRemoveColumnFamily(const std::string& column_family) {
+void RocksDBStorageRowTX::lazyRowDataRemoveColumnFamily(
+    std::string const& column_family) {
   for (auto it = lazy_row_data_.begin(); it != lazy_row_data_.end();) {
-    (std::get<0>(it->first) == column_family) ? lazy_row_data_.erase(it++) : (++it);
+    (std::get<0>(it->first) == column_family) ? lazy_row_data_.erase(it++)
+                                              : (++it);
   }
 }
 
-bool RocksDBStorageRowTX::hasLazyRowData(
-    const std::string& column_family,
-    const std::string& column_qualifier
-) {
-  return lazy_row_data_.find(std::make_tuple(column_family, column_qualifier)) != lazy_row_data_.end();
+bool RocksDBStorageRowTX::hasLazyRowData(std::string const& column_family,
+                                         std::string const& column_qualifier) {
+  return lazy_row_data_.find(std::make_tuple(
+             column_family, column_qualifier)) != lazy_row_data_.end();
 }
 
 storage::RowData& RocksDBStorageRowTX::lazyRowDataRef(
-    const std::string& column_family,
-    const std::string& column_qualifier
-) {
+    std::string const& column_family, std::string const& column_qualifier) {
   return lazy_row_data_[std::make_tuple(column_family, column_qualifier)];
 }
 
 Status RocksDBStorageRowTX::lazyRowDataDelete(
-    const std::string& column_family,
-    const std::string& column_qualifier
-) {
-  lazy_row_data_.erase(lazy_row_data_.find(std::make_tuple(column_family, column_qualifier)));
-  return db_->RawDataDeleteColumn(
-      txn_, table_name_, column_family, row_key_, column_qualifier
-  );
+    std::string const& column_family, std::string const& column_qualifier) {
+  lazy_row_data_.erase(
+      lazy_row_data_.find(std::make_tuple(column_family, column_qualifier)));
+  return db_->RawDataDeleteColumn(txn_, table_name_, column_family, row_key_,
+                                  column_qualifier);
 }
 
-Status RocksDBStorageRowTX::DeleteRowFromColumnFamily(std::string const& column_family) {
+Status RocksDBStorageRowTX::DeleteRowFromColumnFamily(
+    std::string const& column_family) {
   lazyRowDataRemoveColumnFamily(column_family);
   return db_->RawDataDelete(txn_, table_name_, column_family, row_key_);
 }
@@ -88,26 +89,26 @@ Status RocksDBStorageRowTX::DeleteRowFromColumnFamily(std::string const& column_
 Status RocksDBStorageRowTX::Commit() {
   for (auto const& row_entry : lazy_row_data_) {
     auto out = db_->SerializeRow(row_entry.second);
-    auto status = db_->RawDataPut(
-        txn_, table_name_, std::get<0>(row_entry.first), row_key_, std::get<1>(row_entry.first), std::move(out)
-    );
+    auto status =
+        db_->RawDataPut(txn_, table_name_, std::get<0>(row_entry.first),
+                        row_key_, std::get<1>(row_entry.first), std::move(out));
     if (!status.ok()) {
       return Rollback(status);
     }
   }
-  const auto status = txn_->Commit();
+  auto const status = txn_->Commit();
   assert(status.ok());
   delete txn_;
   txn_ = nullptr;
   return Status();
 }
 
-Status RocksDBStorageRowTX::LoadRow(std::string const& column_family, std::string const& column_qualifier) {
+Status RocksDBStorageRowTX::LoadRow(std::string const& column_family,
+                                    std::string const& column_qualifier) {
   if (!hasLazyRowData(column_family, column_qualifier)) {
     std::string out;
-    auto get_status = db_->RawDataGet(
-        txn_, table_name_, column_family, row_key_, column_qualifier, &out
-    );
+    auto get_status = db_->RawDataGet(txn_, table_name_, column_family,
+                                      row_key_, column_qualifier, &out);
     if (!get_status.ok()) {
       return get_status;
     }
@@ -124,29 +125,26 @@ Status RocksDBStorageRowTX::LoadRow(std::string const& column_family, std::strin
   return Status();
 }
 
-Status RocksDBStorageRowTX::SetCell(
-    std::string const& column_family,
-    std::string const& column_qualifier,
-    std::chrono::milliseconds timestamp,
-    std::string const& value
-) {
+Status RocksDBStorageRowTX::SetCell(std::string const& column_family,
+                                    std::string const& column_qualifier,
+                                    std::chrono::milliseconds timestamp,
+                                    std::string const& value) {
   DBG("RocksDBStorageRowTX:SetCell executing");
   auto status = LoadRow(column_family, column_qualifier);
   if (!status.ok()) {
     return status;
   }
-  RowDataEnsure(lazyRowDataRef(column_family, column_qualifier), column_qualifier, timestamp, value);
+  RowDataEnsure(lazyRowDataRef(column_family, column_qualifier),
+                column_qualifier, timestamp, value);
   DBG("RocksDBStorageRowTX:SetCell exit");
   return Status();
 }
 
 StatusOr<absl::optional<std::string>> RocksDBStorageRowTX::UpdateCell(
-    std::string const& column_family,
-    std::string const& column_qualifier,
-    std::chrono::milliseconds timestamp,
-    std::string& value,
-    std::function<StatusOr<std::string>(std::string const&, std::string&&)> const& update_fn
-) {
+    std::string const& column_family, std::string const& column_qualifier,
+    std::chrono::milliseconds timestamp, std::string& value,
+    std::function<StatusOr<std::string>(std::string const&,
+                                        std::string&&)> const& update_fn) {
   DBG("RocksDBStorageRowTX:UpdateCell executing");
   auto status = LoadRow(column_family, column_qualifier);
   if (!status.ok()) {
@@ -154,7 +152,7 @@ StatusOr<absl::optional<std::string>> RocksDBStorageRowTX::UpdateCell(
   }
   auto& row_data = lazyRowDataRef(column_family, column_qualifier);
   absl::optional<std::string> old_value = absl::nullopt;
-  const auto& cells = (row_data.mutable_column()->mutable_cells());
+  auto const& cells = (row_data.mutable_column()->mutable_cells());
   auto cell_it = cells->find(timestamp.count());
   if (cell_it != cells->end()) {
     old_value = cell_it->second;
@@ -169,10 +167,8 @@ StatusOr<absl::optional<std::string>> RocksDBStorageRowTX::UpdateCell(
 }
 
 Status RocksDBStorageRowTX::DeleteRowColumn(
-    std::string const& column_family,
-    std::string const& column_qualifier,
-    ::google::bigtable::v2::TimestampRange const& time_range
-) {
+    std::string const& column_family, std::string const& column_qualifier,
+    ::google::bigtable::v2::TimestampRange const& time_range) {
   DBG("RocksDBStorageRowTX:DeleteRowColumn executing");
   auto status = LoadRow(column_family, column_qualifier);
   if (!status.ok()) {
@@ -182,22 +178,29 @@ Status RocksDBStorageRowTX::DeleteRowColumn(
   auto& cells = (*row_data.mutable_column()->mutable_cells());
   int64_t start_micros = time_range.start_timestamp_micros();
   absl::optional<int64_t> maybe_end_micros =
-      time_range.end_timestamp_micros() == 0 ? absl::nullopt : absl::optional<int64_t>(time_range.end_timestamp_micros());
+      time_range.end_timestamp_micros() == 0
+          ? absl::nullopt
+          : absl::optional<int64_t>(time_range.end_timestamp_micros());
   auto start_millis = std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::microseconds(start_micros)).count();
-  for (auto cell_it = cells.begin(); cell_it != cells.end(); ) {
+                          std::chrono::microseconds(start_micros))
+                          .count();
+  for (auto cell_it = cells.begin(); cell_it != cells.end();) {
     int64_t cell_timestamp = cell_it->first;
     bool in_range = cell_timestamp >= start_millis;
     if (maybe_end_micros.has_value()) {
       auto end_millis = std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::microseconds(*maybe_end_micros)).count();
+                            std::chrono::microseconds(*maybe_end_micros))
+                            .count();
       in_range = in_range && cell_timestamp < end_millis;
     }
     if (in_range) {
-      DBG(absl::StrCat("RocksDBStorageRowTX:DeleteRowColumn erased cell timestamp ", cell_timestamp));
+      DBG(absl::StrCat(
+          "RocksDBStorageRowTX:DeleteRowColumn erased cell timestamp ",
+          cell_timestamp));
       cell_it = cells.erase(cell_it);
     } else {
-      DBG(absl::StrCat("RocksDBStorageRowTX:DeleteRowColumn preserved cell ", cell_timestamp, " vs start ", start_millis));
+      DBG(absl::StrCat("RocksDBStorageRowTX:DeleteRowColumn preserved cell ",
+                       cell_timestamp, " vs start ", start_millis));
       ++cell_it;
     }
   }
