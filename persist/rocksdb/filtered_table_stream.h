@@ -1,6 +1,6 @@
 /**
- * @file column_family_stream.h
- * @brief RocksDB-backed column family stream for iterating cells.
+ * @file filtered_table_stream.h
+ * @brief RocksDB merge of multiple column family streams with filter pushdown.
  */
 #include "filter.h"
 #include "re2/re2.h"
@@ -17,28 +17,34 @@ namespace bigtable {
 namespace emulator {
 
 /**
- * This is very similar to FilteredTableStream.
- * We didn't want to move all the files to persist/ directory, because that would make diff
- * for persistence implementation unreadable. Currently persist/memory offers thin wrapper around Table
- * class (used previously for in-memory storage). All other required logic was extracted from Table class.
- * This includes this utility class.
+ * Merge of multiple RocksDB column family streams with filter pushdown.
  *
- * In Table this class is used only to enable testing. We use it to group multiple streams into one in RocksDB storage implementation.
- * It differs from FilteredTableStream by the unique ptr type.
- *    (Here)  :  std::vector<std::unique_ptr<AbstractFamilyColumnStreamImpl>>
- *    (There) :  std::vector<std::unique_ptr<FilteredColumnFamilyStream>>
+ * Analogous to FilteredTableStream in the in-memory path: groups multiple
+ * AbstractFamilyColumnStreamImpl streams into one MergeCellStreams. Used by
+ * RocksDB storage to serve ReadRows. Differs from FilteredTableStream by
+ * holding std::unique_ptr<AbstractFamilyColumnStreamImpl> instead of
+ * std::unique_ptr<FilteredColumnFamilyStream>, so the same merge logic works
+ * with RocksDB-backed streams.
  *
- * TODO: This could be turned into templated class in the future
+ * TODO: Could be turned into a templated class shared with the in-memory path.
  */
 class StorageFitleredTableStream : public MergeCellStreams {
  public:
-  /** Constructs from a vector of column family stream implementations. */
+  /**
+   * Constructs from a vector of column family stream implementations.
+   * @param cf_streams Column family streams to merge (ownership transferred).
+   */
   explicit StorageFitleredTableStream(
       std::vector<std::unique_ptr<AbstractFamilyColumnStreamImpl>> cf_streams)
       : MergeCellStreams(CreateCellStreams(std::move(cf_streams))) {}
 
-  /** Applies filter; prunes streams that don't match FamilyNameRegex or
-   * ColumnRange. */
+  /**
+   * Applies filter at the merge level: for FamilyNameRegex or ColumnRange,
+   * prunes streams that don't match or delegates to the matching stream.
+   * Other filters are passed to the base MergeCellStreams.
+   * @param internal_filter Filter to apply.
+   * @return true if the filter was applied (or is a no-op).
+   */
   bool ApplyFilter(InternalFilter const& internal_filter) override {
     if (!absl::holds_alternative<FamilyNameRegex>(internal_filter) &&
         !absl::holds_alternative<ColumnRange>(internal_filter)) {
@@ -75,7 +81,12 @@ class StorageFitleredTableStream : public MergeCellStreams {
   }
 
  private:
-  /** Builds CellStream vector from column family stream implementations. */
+  /**
+   * Builds the CellStream vector expected by MergeCellStreams from column
+   * family stream implementations.
+   * @param cf_streams Column family streams (ownership transferred).
+   * @return Vector of CellStream wrapping the given streams.
+   */
   static std::vector<CellStream> CreateCellStreams(
       std::vector<std::unique_ptr<AbstractFamilyColumnStreamImpl>> cf_streams) {
     std::vector<CellStream> res;

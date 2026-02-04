@@ -22,6 +22,10 @@ class RocksDBStorage;
 
 /**
  * RocksDB implementation of a row-scoped storage transaction.
+ *
+ * Uses RocksDB transactions for atomicity. Row data is loaded lazily into
+ * lazy_row_data_ when needed for reads or writes; mutations are applied
+ * within the RocksDB transaction scope and flushed on Commit().
  */
 class RocksDBStorageRowTX : public StorageRowTX {
   friend class RocksDBStorage;
@@ -30,10 +34,10 @@ class RocksDBStorageRowTX : public StorageRowTX {
   /** Destroys the transaction (rolls back if not committed). */
   virtual ~RocksDBStorageRowTX();
 
-  /** Commits the transaction. */
+  /** Commits the transaction (writes lazy row data to RocksDB). */
   virtual Status Commit() override;
 
-  /** Rolls back the transaction. */
+  /** Rolls back the transaction (abandons RocksDB transaction). */
   virtual Status Rollback(Status status) override;
 
   /** @copydoc StorageRowTX::SetCell */
@@ -61,36 +65,74 @@ class RocksDBStorageRowTX : public StorageRowTX {
   virtual Status DeleteRowFromColumnFamily(
       std::string const& column_family) override;
 
-  /** Loads row data for the given column into local transaction state. */
+  /**
+   * Loads row data for the given column into local transaction state.
+   * @param column_family Column family name.
+   * @param column_qualifier Column qualifier.
+   * @return Status of the load operation.
+   */
   Status LoadRow(std::string const& column_family,
                  std::string const& column_qualifier);
 
  private:
-  rocksdb::Transaction* txn_;
-  rocksdb::ReadOptions roptions_;
-  std::string const row_key_;
-  std::string const table_name_;
-  RocksDBStorage* db_;
+  rocksdb::Transaction* txn_;   /**< RocksDB transaction for this row. */
+  rocksdb::ReadOptions roptions_; /**< Read options for snapshot/consistency. */
+  std::string const row_key_;   /**< Row key for this transaction. */
+  std::string const table_name_; /**< Table name for this transaction. */
+  RocksDBStorage* db_;           /**< Backing RocksDB storage. */
 
-  /** Key used to fetch row data:[column_family, column_qualifier]  */
+  /** Key used to fetch row data: [column_family, column_qualifier]. */
   using row_data_key_t = std::tuple<std::string, std::string>;
-  /** Maps [column_family, column_qualifier] into row data */
+  /**
+   * Cache of row data keyed by (column_family, column_qualifier).
+   * Loaded on demand when reading or writing; written back to RocksDB on
+   * Commit(). Acts as a simple ORM over the transaction.
+   */
   std::map<row_data_key_t, storage::RowData> lazy_row_data_;
 
   /**
-  * We use field lazy_row_data_ to simulate alterations of rows.
-  * This is very simplistic form of ORM.
-  * When we write specific row value we need to load the row data first, and then write it altered as part of the rocksdb::Transaction scope.
-  * Private lazy methods are helpers to make data access esier.
-  */
+   * Removes all cached row data entries for the given column family.
+   * Used when deleting a row from a column family.
+   * @param column_family Column family name to clear from the cache.
+   */
   void lazyRowDataRemoveColumnFamily(std::string const& column_family);
+
+  /**
+   * Returns whether row data for the given column is already in the cache.
+   * @param column_family Column family name.
+   * @param column_qualifier Column qualifier.
+   * @return true if lazy_row_data_ contains an entry for this column.
+   */
   bool hasLazyRowData(std::string const& column_family,
                       std::string const& column_qualifier);
+
+  /**
+   * Returns a reference to cached row data for the column; loads from RocksDB
+   * if not present. Used when reading or mutating cell data.
+   * @param column_family Column family name.
+   * @param column_qualifier Column qualifier.
+   * @return Mutable reference to the RowData in lazy_row_data_.
+   */
   storage::RowData& lazyRowDataRef(std::string const& column_family,
                                    std::string const& column_qualifier);
+
+  /**
+   * Removes row data for the column from the cache and deletes the column
+   * from RocksDB within the transaction.
+   * @param column_family Column family name.
+   * @param column_qualifier Column qualifier.
+   * @return Status of the delete operation.
+   */
   Status lazyRowDataDelete(std::string const& column_family,
                            std::string const& column_qualifier);
 
+  /**
+   * Private constructor; use RocksDBStorage::RowTransaction() to create.
+   * @param table_name Table name.
+   * @param row_key Row key.
+   * @param txn RocksDB transaction.
+   * @param db Pointer to backing RocksDB storage.
+   */
   explicit RocksDBStorageRowTX(std::string const table_name,
                                std::string const row_key,
                                rocksdb::Transaction* txn, RocksDBStorage* db);
