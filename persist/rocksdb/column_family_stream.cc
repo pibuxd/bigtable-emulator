@@ -15,7 +15,6 @@
 #include "persist/rocksdb/column_family_stream.h"
 #include "absl/strings/str_cat.h"
 #include "persist/rocksdb/storage.h"
-#include "persist/storage.h"
 #include <cassert>
 
 namespace google {

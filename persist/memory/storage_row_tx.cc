@@ -21,7 +21,6 @@
 #include "persist/logging.h"
 #include "persist/memory/storage.h"
 #include "persist/storage.h"
-#include <cassert>
 
 namespace google {
 namespace cloud {

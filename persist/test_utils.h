@@ -1,21 +1,13 @@
 #ifndef GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_PERSIST_TEST_UTILS
 #define GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_PERSIST_TEST_UTILS
 
-#include "google/cloud/testing_util/chrono_literals.h"
-#include "column_family.h"
 #include "filter.h"
 #include "persist/memory/storage.h"
 #include "persist/rocksdb/storage.h"
-#include "range_set.h"
-#include "re2/re2.h"
-#include "table.h"
 #include <gtest/gtest.h>
 #include <filesystem>
 #include <memory>
-#include <ostream>
-#include <sstream>
 #include <string>
-#include <utility>
 #include <vector>
 
 #define EXPECT_TABLE_NAMES_PREFIX(PREFIX, ...) \

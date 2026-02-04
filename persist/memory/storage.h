@@ -24,15 +24,7 @@
 #include <google/bigtable/admin/v2/table.pb.h>
 #include <google/bigtable/v2/data.pb.h>
 #include <algorithm>
-#include <chrono>
-#include <map>
-#include <memory>
-#include <set>
-#include <string>
 #include <string_view>
-#include <thread>
-#include <type_traits>
-#include <vector>
 
 namespace google {
 namespace cloud {

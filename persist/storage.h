@@ -18,7 +18,6 @@
 #include "persist/storage_row_tx.h"
 #include <google/bigtable/admin/v2/table.pb.h>
 #include <functional>
-#include <iostream>
 #include <memory>
 #include <string>
 #include <vector>

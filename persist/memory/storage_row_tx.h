@@ -9,9 +9,6 @@
 #include "persist/proto/storage.pb.h"
 #include "persist/storage_row_tx.h"
 #include "table.h"
-#include <map>
-#include <string>
-#include <tuple>
 
 namespace google {
 namespace cloud {
