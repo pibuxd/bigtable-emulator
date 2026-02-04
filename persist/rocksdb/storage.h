@@ -213,7 +213,7 @@ class RocksDBStorage : public Storage {
       return Status();
     }
 
-    DBG("RocksDBStorage:Close killing meta handle");
+    DBG("[RocksDBStorage][UncheckedClose] killing meta handle");
     for (auto& pair : column_families_handles_map) {
       delete pair.second;
     }
@@ -221,24 +221,25 @@ class RocksDBStorage : public Storage {
 
     rocksdb::WaitForCompactOptions opts;
     opts.close_db = true;
-    DBG("RocksDBStorage:Close waiting for compact");
+    DBG("[RocksDBStorage][UncheckedClose] waiting for compact");
     auto status = GetStatus(db->WaitForCompact(opts), "Wait for compact");
     if (!status.ok()) {
-      DBG(absl::StrCat("RocksDBStorage:Close error: ", status.message()));
+      DBG("[RocksDBStorage][UncheckedClose] error: {}", status.message());
       return status;
     }
-    DBG("RocksDBStorage:Close deleting DB");
+    DBG("[RocksDBStorage][UncheckedClose] deleting DB");
     db = nullptr;
-    DBG("RocksDBStorage:Close deleted DB");
+    DBG("[RocksDBStorage][UncheckedClose] deleted DB");
     metaHandle = nullptr;
-    DBG("RocksDBStorage:Close exit");
+    DBG("[RocksDBStorage][UncheckedClose] exit");
     return Status();
   }
 
   /** @copydoc Storage::Open */
   virtual Status UncheckedOpen(
       std::vector<std::string> additional_cf_names = {}) {
-    DBG("RocksDBStorage:Open call");
+    DBG("[RocksDBStorage][UncheckedOpen] call additional_cf_names.size()={}",
+        additional_cf_names.size());
     options = rocksdb::Options();
     txn_options = rocksdb::TransactionDBOptions();
     woptions = rocksdb::WriteOptions();
@@ -251,7 +252,8 @@ class RocksDBStorage : public Storage {
         options, storage_config.db_path(), &existing_cf_names);
     bool is_new_database = !status.ok();
     if (is_new_database) {
-      DBG("RocksDBStorage:Open no existing DB, will create new one");
+      DBG("[RocksDBStorage][UncheckedOpen] no existing DB path={}",
+          storage_config.db_path());
       existing_cf_names.clear();
       // New database - start with just default CF
       existing_cf_names.push_back(rocksdb::kDefaultColumnFamilyName);
@@ -281,7 +283,8 @@ class RocksDBStorage : public Storage {
           cf_name, rocksdb::ColumnFamilyOptions()));
     }
 
-    DBG("RocksDBStorage:Open first open");
+    DBG("[RocksDBStorage][UncheckedOpen] first open path={} cf_count={}",
+        storage_config.db_path(), column_families.size());
     std::vector<CFHandle> handles;
     auto open_status = OpenDBWithRetry(options, column_families, &handles);
 
@@ -292,12 +295,13 @@ class RocksDBStorage : public Storage {
       minimal_cfs.push_back(rocksdb::ColumnFamilyDescriptor(
           rocksdb::kDefaultColumnFamilyName, rocksdb::ColumnFamilyOptions()));
 
-      DBG("RocksDBStorage:Open after failed init");
+      DBG("[RocksDBStorage][UncheckedOpen] after failed init path={}",
+          storage_config.db_path());
       open_status = OpenDBWithRetry(options, minimal_cfs, &handles);
       if (!open_status.ok()) {
-        DBG(absl::StrCat("RocksDBStorage:Open failed to create new DB: ",
-                         open_status.message(),
-                         " on path: ", storage_config.db_path()));
+        DBG("[RocksDBStorage][UncheckedOpen] failed to create new DB path={} "
+            "error={}",
+            storage_config.db_path(), open_status.message());
         return open_status;
       }
 
@@ -308,9 +312,9 @@ class RocksDBStorage : public Storage {
           &meta_cf_handle);
 
       if (!create_cf_status.ok()) {
-        DBG(absl::StrCat("RocksDBStorage:Open failed to create meta CF: ",
-                         create_cf_status.ToString(),
-                         " on path: ", storage_config.db_path()));
+        DBG("[RocksDBStorage][UncheckedOpen] failed to create meta CF path={} "
+            "error={}",
+            storage_config.db_path(), create_cf_status.ToString());
         // Clean up
         for (auto h : handles) delete h;
         delete db;
@@ -320,8 +324,8 @@ class RocksDBStorage : public Storage {
 
       handles.push_back(meta_cf_handle);
     } else if (!open_status.ok()) {
-      DBG(absl::StrCat("RocksDBStorage:Open failed: ", open_status.message(),
-                       " on path: ", storage_config.db_path()));
+      DBG("[RocksDBStorage][UncheckedOpen] failed path={} error={}",
+          storage_config.db_path(), open_status.message());
       return open_status;
     }
 
@@ -409,7 +413,8 @@ class RocksDBStorage : public Storage {
       for (auto h : cf_handles) delete h;
       delete regular_db;
 
-      DBG("RocksDBStorage:CreateTable reopen");
+      DBG("[RocksDBStorage][CreateTable] reopen table_name={}",
+          schema.name());
       auto reopen_status = UncheckedOpen();
       if (!reopen_status.ok()) {
         return reopen_status;
@@ -592,7 +597,9 @@ class RocksDBStorage : public Storage {
     for (auto h : cf_handles) delete h;
     delete regular_db;
 
-    DBG("RocksDBStorage:CreateTable open on ensure column families exist");
+    DBG("[RocksDBStorage][CreateTable] open on ensure column families exist "
+        "missing_cfs_count={}",
+        missing_cfs.size());
     return UncheckedOpen();
   }
 
@@ -917,9 +924,8 @@ class RocksDBStorage : public Storage {
                                             storage_config.db_path(),
                                             column_families, handles, &db);
       if (!status.ok()) {
-        DBG(absl::StrCat("OpenDBWithRetry failed on path '",
-                         storage_config.db_path(),
-                         "' with code: ", status.code()));
+        DBG("[OpenDBWithRetry] failed path={} code={}", storage_config.db_path(),
+            (uint64_t)status.code());
       }
       if (status.IsIOError()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(250));

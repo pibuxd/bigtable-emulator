@@ -41,8 +41,8 @@ static inline void RowDataEnsure(storage::RowData& row,
                                  std::string const& column_qualifier,
                                  std::chrono::milliseconds const& timestamp,
                                  std::string const& value) {
-  DBG(absl::StrCat("RowDataEnsure: setting cell timestamp ",
-                   timestamp.count()));
+  DBG("[RowDataEnsure] setting cell timestamp {} (column_qualifier={})",
+      timestamp.count(), column_qualifier);
   (*(*row.mutable_column()).mutable_cells())[timestamp.count()] = value;
 }
 

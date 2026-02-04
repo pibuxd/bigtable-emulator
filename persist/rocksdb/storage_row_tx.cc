@@ -24,12 +24,16 @@ namespace bigtable {
 namespace emulator {
 
 RocksDBStorageRowTX::~RocksDBStorageRowTX() {
-  DBG("RocksDBStorageRowTX:~RocksDBStorageRowTX destructor entered");
+  DBG("[RocksDBStorageRowTX][~RocksDBStorageRowTX] destructor table={} "
+      "row={} txn_null={}",
+      table_name_, row_key_, (txn_ == nullptr));
   if (txn_ != nullptr) {
-    DBG("RocksDBStorageRowTX:~RocksDBStorageRowTX performing rollback");
+    DBG("[RocksDBStorageRowTX][~RocksDBStorageRowTX] performing rollback "
+        "table={} row={}",
+        table_name_, row_key_);
     Rollback(Status());
   }
-  DBG("RocksDBStorageRowTX:~RocksDBStorageRowTX exit");
+  DBG("[RocksDBStorageRowTX][~RocksDBStorageRowTX] exit");
 }
 
 Status RocksDBStorageRowTX::Rollback(Status status) {
@@ -129,14 +133,16 @@ Status RocksDBStorageRowTX::SetCell(std::string const& column_family,
                                     std::string const& column_qualifier,
                                     std::chrono::milliseconds timestamp,
                                     std::string const& value) {
-  DBG("RocksDBStorageRowTX:SetCell executing");
+  DBG("[RocksDBStorageRowTX][SetCell] table={} row={} cf={} cq={} ts={}",
+      table_name_, row_key_, column_family, column_qualifier, timestamp.count());
   auto status = LoadRow(column_family, column_qualifier);
   if (!status.ok()) {
     return status;
   }
   RowDataEnsure(lazyRowDataRef(column_family, column_qualifier),
                 column_qualifier, timestamp, value);
-  DBG("RocksDBStorageRowTX:SetCell exit");
+  DBG("[RocksDBStorageRowTX][SetCell] exit table={} row={}", table_name_,
+      row_key_);
   return Status();
 }
 
@@ -145,7 +151,8 @@ StatusOr<absl::optional<std::string>> RocksDBStorageRowTX::UpdateCell(
     std::chrono::milliseconds timestamp, std::string& value,
     std::function<StatusOr<std::string>(std::string const&,
                                         std::string&&)> const& update_fn) {
-  DBG("RocksDBStorageRowTX:UpdateCell executing");
+  DBG("[RocksDBStorageRowTX][UpdateCell] table={} row={} cf={} cq={} ts={}",
+      table_name_, row_key_, column_family, column_qualifier, timestamp.count());
   auto status = LoadRow(column_family, column_qualifier);
   if (!status.ok()) {
     return status;
@@ -162,14 +169,18 @@ StatusOr<absl::optional<std::string>> RocksDBStorageRowTX::UpdateCell(
     return maybe_new_value.status();
   }
   RowDataEnsure(row_data, column_qualifier, timestamp, maybe_new_value.value());
-  DBG("RocksDBStorageRowTX:UpdateCell exit");
+  DBG("[RocksDBStorageRowTX][UpdateCell] exit table={} row={}", table_name_,
+      row_key_);
   return old_value;
 }
 
 Status RocksDBStorageRowTX::DeleteRowColumn(
     std::string const& column_family, std::string const& column_qualifier,
     ::google::bigtable::v2::TimestampRange const& time_range) {
-  DBG("RocksDBStorageRowTX:DeleteRowColumn executing");
+  DBG("[RocksDBStorageRowTX][DeleteRowColumn] table={} row={} cf={} cq={} "
+      "start_micros={} end_micros={}",
+      table_name_, row_key_, column_family, column_qualifier,
+      time_range.start_timestamp_micros(), time_range.end_timestamp_micros());
   auto status = LoadRow(column_family, column_qualifier);
   if (!status.ok()) {
     return status;
@@ -194,30 +205,38 @@ Status RocksDBStorageRowTX::DeleteRowColumn(
       in_range = in_range && cell_timestamp < end_millis;
     }
     if (in_range) {
-      DBG(absl::StrCat(
-          "RocksDBStorageRowTX:DeleteRowColumn erased cell timestamp ",
-          cell_timestamp));
+      DBG("[RocksDBStorageRowTX][DeleteRowColumn] erased cell table={} row={} "
+          "cf={} cq={} cell_ts={}",
+          table_name_, row_key_, column_family, column_qualifier, cell_timestamp);
       cell_it = cells.erase(cell_it);
     } else {
-      DBG(absl::StrCat("RocksDBStorageRowTX:DeleteRowColumn preserved cell ",
-                       cell_timestamp, " vs start ", start_millis));
+      DBG("[RocksDBStorageRowTX][DeleteRowColumn] preserved cell table={} "
+          "row={} cell_ts={} start_millis={}",
+          table_name_, row_key_, cell_timestamp, start_millis);
       ++cell_it;
     }
   }
-  DBG("RocksDBStorageRowTX:DeleteRowColumn end iteration");
+  DBG("[RocksDBStorageRowTX][DeleteRowColumn] end iteration table={} row={} "
+      "cf={} cq={}",
+      table_name_, row_key_, column_family, column_qualifier);
   if (cells.empty()) {
-    DBG("RocksDBStorageRowTX:DeleteRowColumn empty column deleting");
+    DBG("[RocksDBStorageRowTX][DeleteRowColumn] empty column deleting table={} "
+        "row={} cf={} cq={}",
+        table_name_, row_key_, column_family, column_qualifier);
     auto del_status = lazyRowDataDelete(column_family, column_qualifier);
     if (!del_status.ok()) {
       return del_status;
     }
   }
-  DBG("RocksDBStorageRowTX:DeleteRowColumn exit");
+  DBG("[RocksDBStorageRowTX][DeleteRowColumn] exit table={} row={}",
+      table_name_, row_key_);
   return Status();
 }
 
 Status RocksDBStorageRowTX::DeleteRowFromAllColumnFamilies() {
-  DBG("RocksDBStorageRowTX:DeleteRowFromAllColumnFamilies executing");
+  DBG("[RocksDBStorageRowTX][DeleteRowFromAllColumnFamilies] table={} row={} "
+      "cf_count={}",
+      table_name_, row_key_, db_->column_families_handles_map.size());
   for (auto const& cf_entry : db_->column_families_handles_map) {
     if (cf_entry.first == db_->storage_config.meta_column_family()) {
       continue;
@@ -227,7 +246,9 @@ Status RocksDBStorageRowTX::DeleteRowFromAllColumnFamilies() {
       return status;
     }
   }
-  DBG("RocksDBStorageRowTX:DeleteRowFromAllColumnFamilies exit");
+  DBG("[RocksDBStorageRowTX][DeleteRowFromAllColumnFamilies] exit table={} "
+      "row={}",
+      table_name_, row_key_);
   return Status();
 }
 

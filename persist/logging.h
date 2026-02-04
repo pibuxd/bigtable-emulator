@@ -1,7 +1,7 @@
 #ifndef GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_PERSIST_LOGGING_H
 #define GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_PERSIST_LOGGING_H
 
-#include "fmtlog.h"
+#include "fmtlog-inl.h"
 
 #define XNDBG(TEXT)                \
   if (true) {                    \

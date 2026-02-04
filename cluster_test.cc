@@ -25,7 +25,6 @@ namespace {
 TEST(Cluster, BasicTableOperations) {
   RocksDBStorageTestManager m;
   std::shared_ptr<Cluster> cluster = std::make_shared<Cluster>(m.getStorage());
-  DBG("Running ExampleClusterCode() from example.cc");
 
   auto const* const table_name = "projects/test/instances/test/tables/test";
   auto const* const column_family_name = "test_column_family";
@@ -84,7 +83,9 @@ TEST(Cluster, BasicTableOperations) {
 
   auto maybe_get_table = cluster->FindTable(table_name);
   if (!maybe_get_table.ok()) {
-    DBG(maybe_get_table.status().message());
+    DBG("[ClusterTest][BasicTableOperations] FindTable failed table_name={} "
+        "error={}",
+        table_name, maybe_get_table.status().message());
     return;
   }
   auto primary_table = maybe_get_table.value();

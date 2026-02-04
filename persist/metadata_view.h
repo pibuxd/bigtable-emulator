@@ -41,13 +41,13 @@ class CachedTablesMetadataView {
   /** Returns vector of table names in this view. */
   inline std::vector<std::string> names() const {
     std::vector<std::string> tmp;
-    DBG("TablesMetadataView:names listing tables");
+    DBG("[TablesMetadataView][names] listing tables");
     std::transform(
         begin(), end(), std::back_inserter(tmp), [](auto el) -> auto {
-          DBG(absl::StrCat("TablesMetadataView:names => ", std::get<0>(el)));
+          DBG("[TablesMetadataView][names] table => {}", std::get<0>(el));
           return std::get<0>(el);
         });
-    DBG("TablesMetadataView:names end");
+    DBG("[TablesMetadataView][names] end, count={}", tmp.size());
     return tmp;
   }
 };

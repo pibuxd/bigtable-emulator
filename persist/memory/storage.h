@@ -58,7 +58,7 @@ class MemoryStorage : public Storage {
 
 public:
 /** Default constructor for in-memory storage (no persistence, no config). */
-explicit MemoryStorage() { DBG("MemoryStorage:MemoryStorage constructed"); }
+explicit MemoryStorage() { DBG("[MemoryStorage][MemoryStorage] constructed"); }
 
 /**
  * Returns a cached view of table metadata for tables whose names start with
@@ -68,8 +68,7 @@ explicit MemoryStorage() { DBG("MemoryStorage:MemoryStorage constructed"); }
  */
 virtual CachedTablesMetadataView Tables(
     std::string const& prefix) const override {
-  DBG(absl::StrCat("MemoryStorage:Tables prefix=",
-                   prefix.empty() ? "(all)" : prefix));
+  DBG("[MemoryStorage][Tables] prefix={}", prefix.empty() ? "(all)" : prefix);
   std::vector<std::tuple<std::string, storage::TableMeta>> tables_metas;
   std::transform(table_by_name_.begin(), table_by_name_.end(),
                  std::back_inserter(tables_metas), [](auto el) -> auto {
@@ -95,15 +94,15 @@ virtual CachedTablesMetadataView Tables(
 
 /** Closes the storage and releases resources (no-op for in-memory storage). */
 virtual Status UncheckedClose() override {
-  DBG("MemoryStorage:UncheckedClose");
+  DBG("[MemoryStorage][UncheckedClose]");
   return Status();
 };
 
 /** Starts a row-scoped transaction for the given table and row key. */
 virtual std::unique_ptr<StorageRowTX> RowTransaction(
     std::string const& table_name, std::string const& row_key) override {
-  DBG(absl::StrCat("MemoryStorage:RowTransaction table=", table_name,
-                   " row=", row_key));
+  DBG("[MemoryStorage][RowTransaction] table={} row={}", table_name,
+      row_key);
   auto maybe_table = FindTable(table_name);
   // FIXME: Maybe this should return status somewhere instead of doing assert
   // and failing
@@ -115,14 +114,15 @@ virtual std::unique_ptr<StorageRowTX> RowTransaction(
 /** Opens the storage (no-op for in-memory storage). */
 virtual Status UncheckedOpen(
     std::vector<std::string> additional_cf_names = {}) override {
-  DBG("MemoryStorage:UncheckedOpen");
+  DBG("[MemoryStorage][UncheckedOpen] additional_cf_names.size()={}",
+      additional_cf_names.size());
   return Status();
 };
 
 /** Creates a table with the given schema in memory. */
 virtual Status CreateTable(
     google::bigtable::admin::v2::Table& schema) override {
-  DBG(absl::StrCat("MemoryStorage:CreateTable name=", schema.name()));
+  DBG("[MemoryStorage][CreateTable] name={}", schema.name());
   auto maybe_table = Table::Create(schema);
   if (!maybe_table) {
     return maybe_table.status();
@@ -144,7 +144,7 @@ virtual Status DeleteTable(
     std::string table_name,
     std::function<Status(std::string, storage::TableMeta)>&& precondition_fn)
     override {
-  DBG(absl::StrCat("MemoryStorage:DeleteTable name=", table_name));
+  DBG("[MemoryStorage][DeleteTable] table_name={}", table_name);
   {
     std::lock_guard<std::mutex> lock(mu_);
     auto it = table_by_name_.find(table_name);
@@ -165,7 +165,7 @@ virtual Status DeleteTable(
 /** Returns table metadata for the given table name. */
 virtual StatusOr<storage::TableMeta> GetTable(
     std::string table_name) const override {
-  DBG(absl::StrCat("MemoryStorage:GetTable name=", table_name));
+  DBG("[MemoryStorage][GetTable] table_name={}", table_name);
   std::shared_ptr<Table> found_table;
   {
     std::lock_guard<std::mutex> lock(mu_);
@@ -183,7 +183,7 @@ virtual StatusOr<storage::TableMeta> GetTable(
 /** Updates table metadata (e.g. change_stream_config, deletion_protection). */
 virtual Status UpdateTableMetadata(std::string table_name,
                                    storage::TableMeta const& meta) override {
-  DBG(absl::StrCat("MemoryStorage:UpdateTableMetadata name=", table_name));
+  DBG("[MemoryStorage][UpdateTableMetadata] table_name={}", table_name);
   auto maybe_table = FindTable(table_name);
   if (!maybe_table.ok()) {
     return maybe_table.status();
@@ -215,8 +215,8 @@ virtual Status DeleteColumnFamily(std::string const& cf_name) override {
 virtual StatusOr<CellStream> StreamTable(
     std::string const& table_name, std::shared_ptr<StringRangeSet> range_set,
     bool prefetch_all_columns) override {
-  DBG(absl::StrCat("MemoryStorage:StreamTable table=", table_name,
-                   " prefetch_all_columns=", prefetch_all_columns));
+  DBG("[MemoryStorage][StreamTable] table={} prefetch_all_columns={}",
+      table_name, prefetch_all_columns);
   auto maybe_table = FindTable(table_name);
   // FIXME: Propagate error instead of failing on assert
   if (!maybe_table.ok()) {

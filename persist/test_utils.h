@@ -57,8 +57,8 @@ class StorageTestManager {
   inline rows_dump getTableRowsDump(std::string const& table_name) {
     rows_dump vals;
     auto stream = storage->StreamTableFull(table_name).value();
-    DBG("STREAM HAS VALUE??? ");
-    DBG(stream.HasValue());
+    DBG("[TestUtils][getTableRowsDump] table={} stream.HasValue()={}",
+        table_name, stream.HasValue());
     for (; stream.HasValue(); stream.Next(NextMode::kCell)) {
       auto& v = stream.Value();
       auto row_msg = absl::StrCat(v.column_family(), ".", v.row_key(), ".",
@@ -81,7 +81,8 @@ class StorageTestManager {
     }
     auto create_table_status = storage->CreateTable(schema);
     if (!create_table_status.ok()) {
-      DBG(create_table_status.message());
+      DBG("[TestUtils][createTestTable] CreateTable failed table={} error={}",
+          table_name, create_table_status.message());
     }
     assert(create_table_status.ok());
     return table_name;

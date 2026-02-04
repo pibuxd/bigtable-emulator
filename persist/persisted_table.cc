@@ -73,7 +73,8 @@ PersistedTable::GetColumnFamilyType(std::string const& family_name) {
 
 Status PersistedTable::MutateRow(
     google::bigtable::v2::MutateRowRequest const& request) {
-  DBG("PersistedTable:MutateRow executing");
+  DBG("[PersistedTable][MutateRow] table={} row_key={} mutations_count={}",
+      name_, request.row_key(), request.mutations_size());
   return DoMutationsWithPossibleRollback(request.row_key(),
                                          request.mutations());
 }
@@ -81,7 +82,8 @@ Status PersistedTable::MutateRow(
 Status PersistedTable::ReadRows(
     google::bigtable::v2::ReadRowsRequest const& request,
     RowStreamer& row_streamer) const {
-  DBG("PersistedTable:ReadRows executing");
+  DBG("[PersistedTable][ReadRows] table={} rows_limit={} has_filter={}",
+      name_, request.rows_limit(), request.has_filter());
   std::shared_ptr<StringRangeSet> row_set;
   if (request.has_rows() && (request.rows().row_ranges_size() > 0 ||
                              request.rows().row_keys_size() > 0)) {
@@ -130,14 +132,16 @@ Status PersistedTable::ReadRows(
   if (!row_streamer.Flush(true)) {
     return AbortedError("Stream closed by the client.", GCP_ERROR_INFO());
   }
-  DBG("PersistedTable:ReadRows exit");
+  DBG("[PersistedTable][ReadRows] exit table={} rows_streamed={}", name_,
+      rows_count);
   return Status();
 }
 
 Status PersistedTable::SampleRowKeys(
     double pass_probability,
     grpc::ServerWriter<google::bigtable::v2::SampleRowKeysResponse>* writer) {
-  DBG("PersistedTable:SampleRowKeys executing");
+  DBG("[PersistedTable][SampleRowKeys] table={} pass_probability={}", name_,
+      pass_probability);
   if (pass_probability <= 0.0) {
     return InvalidArgumentError(
         "The sampling probabality must be positive",
@@ -178,7 +182,7 @@ Status PersistedTable::SampleRowKeys(
     auto opts = grpc::WriteOptions();
     opts.set_last_message();
     writer->WriteLast(std::move(resp), opts);
-    DBG("PersistedTable:SampleRowKeys empty table, exit");
+    DBG("[PersistedTable][SampleRowKeys] empty table exit table={}", name_);
     return Status();
   }
 
@@ -214,8 +218,8 @@ Status PersistedTable::SampleRowKeys(
     writer->WriteLast(std::move(resp), opts);
   }
 
-  DBG(absl::StrCat("PersistedTable:SampleRowKeys wrote ",
-                   wrote_a_sample ? "samples" : "single sample", ", exit"));
+  DBG("[PersistedTable][SampleRowKeys] exit table={} wrote_samples={}",
+      name_, wrote_a_sample);
   return Status();
 }
 
@@ -223,8 +227,9 @@ Status PersistedTable::DoMutationsWithPossibleRollback(
     std::string const& row_key,
     google::protobuf::RepeatedPtrField<google::bigtable::v2::Mutation> const&
         mutations) {
-  DBG(absl::StrCat("PersistedTable:DoMutationsWithPossibleRollback executing ",
-                   "row_key size=", row_key.size()));
+  DBG("[PersistedTable][DoMutationsWithPossibleRollback] table={} row_key={} "
+      "row_key_size={} mutations_count={}",
+      name_, row_key, row_key.size(), mutations.size());
   if (row_key.size() > kMaxRowLen) {
     return InvalidArgumentError(
         "The row_key is longer than 4KiB",
@@ -418,14 +423,17 @@ Status PersistedTable::DoMutationsWithPossibleRollback(
     }
   }
 
-  DBG("PersistedTable:DoMutationsWithPossibleRollback committing transaction");
+  DBG("[PersistedTable][DoMutationsWithPossibleRollback] committing "
+      "table={} row_key={}",
+      name_, row_key);
   return txn->Commit();
 }
 
 StatusOr<google::bigtable::v2::ReadModifyWriteRowResponse>
 PersistedTable::ReadModifyWriteRow(
     google::bigtable::v2::ReadModifyWriteRowRequest const& request) {
-  DBG("PersistedTable:ReadModifyWriteRow executing");
+  DBG("[PersistedTable][ReadModifyWriteRow] table={} row_key={} rules_count={}",
+      name_, request.row_key(), request.rules_size());
   if (request.row_key().size() > kMaxRowLen) {
     return InvalidArgumentError(
         "The row_key is longer than 4KiB",
@@ -551,14 +559,18 @@ PersistedTable::ReadModifyWriteRow(
     return commit_status;
   }
 
-  DBG("PersistedTable:ReadModifyWriteRow exit");
+  DBG("[PersistedTable][ReadModifyWriteRow] exit table={} row_key={}", name_,
+      request.row_key());
   return resp;
 }
 
 StatusOr<google::bigtable::v2::CheckAndMutateRowResponse>
 PersistedTable::CheckAndMutateRow(
     google::bigtable::v2::CheckAndMutateRowRequest const& request) {
-  DBG("PersistedTable:CheckAndMutateRow executing");
+  DBG("[PersistedTable][CheckAndMutateRow] table={} row_key={} "
+      "true_mutations={} false_mutations={}",
+      name_, request.row_key(), request.true_mutations_size(),
+      request.false_mutations_size());
   auto const& row_key = request.row_key();
 
   if (row_key.size() > kMaxRowLen) {
@@ -606,9 +618,13 @@ PersistedTable::CheckAndMutateRow(
   CellStream& stream = *maybe_stream;
   if (stream) {
     a_cell_is_found = true;
-    DBG("PersistedTable:CheckAndMutateRow predicate matched, cell found");
+    DBG("[PersistedTable][CheckAndMutateRow] predicate matched table={} "
+        "row_key={}",
+        name_, row_key);
   } else {
-    DBG("PersistedTable:CheckAndMutateRow predicate not matched, no cell");
+    DBG("[PersistedTable][CheckAndMutateRow] predicate not matched table={} "
+        "row_key={}",
+        name_, row_key);
   }
 
   Status status;
@@ -627,7 +643,9 @@ PersistedTable::CheckAndMutateRow(
   google::bigtable::v2::CheckAndMutateRowResponse success_response;
   success_response.set_predicate_matched(a_cell_is_found);
 
-  DBG("PersistedTable:CheckAndMutateRow exit");
+  DBG("[PersistedTable][CheckAndMutateRow] exit table={} row_key={} "
+      "predicate_matched={}",
+      name_, row_key, a_cell_is_found);
   return success_response;
 }
 
@@ -650,7 +668,8 @@ StatusOr<CellStream> PersistedTable::CreateCellStream(
 Status PersistedTable::Update(
     google::bigtable::admin::v2::Table const& new_schema,
     google::protobuf::FieldMask const& to_update) {
-  DBG("PersistedTable:Update executing");
+  DBG("[PersistedTable][Update] table={} mask_paths={}", name_,
+      to_update.paths_size());
   using google::protobuf::util::FieldMaskUtil;
   google::protobuf::FieldMask allowed_mask;
   FieldMaskUtil::FromString(
@@ -693,14 +712,15 @@ Status PersistedTable::Update(
     return status;
   }
 
-  DBG("PersistedTable:Update exit");
+  DBG("[PersistedTable][Update] exit table={}", name_);
   return Status();
 }
 
 StatusOr<google::bigtable::admin::v2::Table>
 PersistedTable::ModifyColumnFamilies(
     google::bigtable::admin::v2::ModifyColumnFamiliesRequest const& request) {
-  DBG("PersistedTable:ModifyColumnFamilies executing");
+  DBG("[PersistedTable][ModifyColumnFamilies] table={} modifications_count={}",
+      name_, request.modifications_size());
   auto maybe_meta = storage_->GetTable(name_);
   if (!maybe_meta.ok()) {
     return maybe_meta.status();
@@ -807,13 +827,16 @@ PersistedTable::ModifyColumnFamilies(
     return status;
   }
 
-  DBG("PersistedTable:ModifyColumnFamilies exit");
+  DBG("[PersistedTable][ModifyColumnFamilies] exit table={} new_cf_count={}",
+      name_, new_schema.column_families_size());
   return new_schema;
 }
 
 Status PersistedTable::DropRowRange(
     google::bigtable::admin::v2::DropRowRangeRequest const& request) {
-  DBG("PersistedTable:DropRowRange executing");
+  DBG("[PersistedTable][DropRowRange] table={} has_prefix={} delete_all={}",
+      name_, request.has_row_key_prefix(),
+      request.has_delete_all_data_from_table());
   if (!request.has_row_key_prefix() &&
       !request.has_delete_all_data_from_table()) {
     return InvalidArgumentError(

@@ -28,11 +28,13 @@ namespace bigtable {
 namespace emulator {
 
 MemoryStorageRowTX::~MemoryStorageRowTX() {
-  DBG("MemoryStorageRowTX:~MemoryStorageRowTX destructor entered");
+  DBG("[MemoryStorageRowTX][~MemoryStorageRowTX] destructor table={} row={}",
+      table_name_, row_key_);
 }
 
 Status MemoryStorageRowTX::Rollback(Status status) {
-  DBG(absl::StrCat("MemoryStorageRowTX:Rollback committed=", committed_));
+  DBG("[MemoryStorageRowTX][Rollback] table={} row={} committed={} status={}",
+      table_name_, row_key_, committed_, status.message());
   if (!committed_) {
     Undo();
   }
@@ -47,14 +49,14 @@ MemoryStorageRowTX::MemoryStorageRowTX(std::string const table_name,
       row_key_(std::move(row_key)),
       db_(db),
       table_(std::move(table)) {
-  DBG(absl::StrCat("MemoryStorageRowTX:MemoryStorageRowTX table=", table_name_,
-                   " row=", row_key_));
+  DBG("[MemoryStorageRowTX][MemoryStorageRowTX] table={} row={}", table_name_,
+      row_key_);
 }
 
 Status MemoryStorageRowTX::DeleteRowFromColumnFamily(
     std::string const& column_family) {
-  DBG(absl::StrCat("MemoryStorageRowTX:DeleteRowFromColumnFamily table=",
-                   table_name_, " row=", row_key_, " cf=", column_family));
+  DBG("[MemoryStorageRowTX][DeleteRowFromColumnFamily] table={} row={} cf={}",
+      table_name_, row_key_, column_family);
   auto maybe_column_family = table_->FindColumnFamily(column_family);
   if (!maybe_column_family.ok()) {
     return maybe_column_family.status();
@@ -92,8 +94,7 @@ Status MemoryStorageRowTX::DeleteRowFromColumnFamily(
 }
 
 Status MemoryStorageRowTX::Commit() {
-  DBG(absl::StrCat("MemoryStorageRowTX:Commit table=", table_name_,
-                   " row=", row_key_));
+  DBG("[MemoryStorageRowTX][Commit] table={} row={}", table_name_, row_key_);
   committed_ = true;
   return Status();
 }
@@ -102,8 +103,8 @@ Status MemoryStorageRowTX::SetCell(std::string const& column_family,
                                    std::string const& column_qualifier,
                                    std::chrono::milliseconds timestamp,
                                    std::string const& value) {
-  DBG(absl::StrCat("MemoryStorageRowTX:SetCell table=", table_name_,
-                   " row=", row_key_, " cf=", column_family));
+  DBG("[MemoryStorageRowTX][SetCell] table={} row={} cf={} cq={} ts={}",
+      table_name_, row_key_, column_family, column_qualifier, timestamp.count());
   auto status = table_->FindColumnFamily(column_family);
   if (!status.ok()) {
     return status.status();
@@ -133,8 +134,8 @@ StatusOr<absl::optional<std::string>> MemoryStorageRowTX::UpdateCell(
     std::chrono::milliseconds timestamp, std::string& value,
     std::function<StatusOr<std::string>(std::string const&,
                                         std::string&&)> const& update_fn) {
-  DBG(absl::StrCat("MemoryStorageRowTX:UpdateCell table=", table_name_,
-                   " row=", row_key_, " cf=", column_family));
+  DBG("[MemoryStorageRowTX][UpdateCell] table={} row={} cf={} cq={} ts={}",
+      table_name_, row_key_, column_family, column_qualifier, timestamp.count());
   auto status = table_->FindColumnFamily(column_family);
   if (!status.ok()) {
     return status.status();
@@ -155,15 +156,18 @@ StatusOr<absl::optional<std::string>> MemoryStorageRowTX::UpdateCell(
                                std::move(maybe_old_value.value().value())};
     undo_.emplace(std::move(restore_value));
   }
-  DBG("MemoryStorageRowTX:UpdateCell exit");
+  DBG("[MemoryStorageRowTX][UpdateCell] exit table={} row={}", table_name_,
+      row_key_);
   return Status();
 }
 
 Status MemoryStorageRowTX::DeleteRowColumn(
     std::string const& column_family, std::string const& column_qualifier,
     ::google::bigtable::v2::TimestampRange const& time_range) {
-  DBG(absl::StrCat("MemoryStorageRowTX:DeleteRowColumn table=", table_name_,
-                   " row=", row_key_, " cf=", column_family));
+  DBG("[MemoryStorageRowTX][DeleteRowColumn] table={} row={} cf={} cq={} "
+      "start_micros={} end_micros={}",
+      table_name_, row_key_, column_family, column_qualifier,
+      time_range.start_timestamp_micros(), time_range.end_timestamp_micros());
   auto maybe_column_family = table_->FindColumnFamily(column_family);
   if (!maybe_column_family.ok()) {
     return maybe_column_family.status();
@@ -177,13 +181,14 @@ Status MemoryStorageRowTX::DeleteRowColumn(
                                std::move(cell.value)};
     undo_.emplace(std::move(restore_value));
   }
-  DBG("MemoryStorageRowTX:DeleteRowColumn exit");
+  DBG("[MemoryStorageRowTX][DeleteRowColumn] exit table={} row={} deleted_cells={}",
+      table_name_, row_key_, deleted_cells.size());
   return Status();
 }
 
 Status MemoryStorageRowTX::DeleteRowFromAllColumnFamilies() {
-  DBG(absl::StrCat("MemoryStorageRowTX:DeleteRowFromAllColumnFamilies table=",
-                   table_name_, " row=", row_key_));
+  DBG("[MemoryStorageRowTX][DeleteRowFromAllColumnFamilies] table={} row={}",
+      table_name_, row_key_);
   bool row_existed = false;
   for (auto& column_family : table_->column_families_) {
     auto deleted_columns = column_family.second->DeleteRow(row_key_);
@@ -199,7 +204,8 @@ Status MemoryStorageRowTX::DeleteRowFromAllColumnFamilies() {
     }
   }
 
-  DBG("MemoryStorageRowTX:DeleteRowFromAllColumnFamilies exit");
+  DBG("[MemoryStorageRowTX][DeleteRowFromAllColumnFamilies] exit row_existed={}",
+      row_existed);
   if (row_existed) {
     return Status();
   }
@@ -208,8 +214,8 @@ Status MemoryStorageRowTX::DeleteRowFromAllColumnFamilies() {
 }
 
 void MemoryStorageRowTX::Undo() {
-  DBG(absl::StrCat("MemoryStorageRowTX:Undo table=", table_name_,
-                   " row=", row_key_, " undo_stack_size=", undo_.size()));
+  DBG("[MemoryStorageRowTX][Undo] table={} row={} undo_stack_size={}",
+      table_name_, row_key_, undo_.size());
   auto row_key = row_key_;
 
   while (!undo_.empty()) {
