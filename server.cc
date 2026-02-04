@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "persist/storage.h"
 #include "server.h"
 #include "cluster.h"
 #include "row_streamer.h"
@@ -357,7 +358,7 @@ class EmulatorTableService final : public btadmin::BigtableTableAdmin::Service {
 
 class DefaultEmulatorServer : public EmulatorServer {
  public:
-  DefaultEmulatorServer(std::string const& host, std::uint16_t port, std::shared_ptr<RocksDBStorage> storage)
+  DefaultEmulatorServer(std::string const& host, std::uint16_t port, std::shared_ptr<Storage> storage)
       : bound_port_(port),
         cluster_(std::make_shared<Cluster>(storage)),
         bt_service_(cluster_),
@@ -384,15 +385,15 @@ class DefaultEmulatorServer : public EmulatorServer {
 };
 
 StatusOr<std::unique_ptr<EmulatorServer>> CreateDefaultEmulatorServer(
-    std::string const& host, std::uint16_t port) {
-    
-  std::shared_ptr<RocksDBStorage> s = std::make_shared<RocksDBStorage>();
-  auto status = s->Open();
+  std::string const& host, std::uint16_t port, const std::shared_ptr<Storage>& storage
+) {
+  
+  auto status = storage->Open();
   if (!status.ok()) {
     return status;
   }
 
-  auto* default_emulator_server = new DefaultEmulatorServer(host, port, s);
+  auto* default_emulator_server = new DefaultEmulatorServer(host, port, storage);
   if (!default_emulator_server->HasValidServer()) {
     return UnknownError("An unknown error occurred when starting server",
                         GCP_ERROR_INFO()

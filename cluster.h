@@ -16,7 +16,7 @@
 #define GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_CLUSTER_H
 
 #include "persist/persisted_table.h"
-#include "persist/rocksdb/storage.h"
+#include "persist/storage.h"
 #include "table.h"
 #include "google/cloud/status.h"
 #include "google/cloud/status_or.h"
@@ -41,7 +41,7 @@ namespace emulator {
 class Cluster {
  public:
 
-   explicit Cluster(std::shared_ptr<RocksDBStorage> storage): storage_(storage) {}
+   explicit Cluster(std::shared_ptr<Storage> storage): storage_(storage) {}
 
   /**
    * Create a new table according to schema.
@@ -115,7 +115,7 @@ class Cluster {
   
 
  private:
-  std::shared_ptr<RocksDBStorage> storage_;
+  std::shared_ptr<Storage> storage_;
 
   mutable std::mutex mu_;
 

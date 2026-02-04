@@ -6,12 +6,15 @@
 #ifndef GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_STORAGE_H
 #define GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_STORAGE_H
 
+#include "persist/logging.h"
 #include "persist/storage_row_tx.h"
+#include "persist/metadata_view.h"
 #include "persist/proto/storage.pb.h"
 #include "absl/strings/str_cat.h"
 #include "google/cloud/status.h"
 #include "google/cloud/status_or.h"
 #include "absl/flags/declare.h"
+#include "filter.h"
 #include "absl/flags/flag.h"
 #include <google/bigtable/admin/v2/table.pb.h>
 #include <functional>
@@ -19,8 +22,6 @@
 #include <memory>
 #include <string>
 #include <vector>
-
-#define DBG(TEXT) if(true){ std::cout << (TEXT) << "\n"; std::cout.flush(); }
 
 ABSL_DECLARE_FLAG(std::string, storage_path);
 
@@ -62,25 +63,43 @@ static inline google::bigtable::admin::v2::Table FakeSchema(std::string const& t
  * Abstract storage interface for the Bigtable emulator.
  */
 class Storage {
+ private:
+  bool is_open_ = false;
+ protected:
+   virtual Status UncheckedOpen(std::vector<std::string> additional_cf_names) = 0;
+   virtual Status UncheckedClose() = 0;
  public:
   /** Default constructor. */
   Storage() {}
   /** Destroys the storage. */
   virtual ~Storage() = default;
-  /** Closes the storage and releases resources. */
-  virtual Status Close() = 0;
 
   /** Starts a row-scoped transaction. */
   virtual std::unique_ptr<StorageRowTX> RowTransaction(std::string const& table_name, std::string const& row_key) = 0;
+  
+  /** Closes the storage and releases resources. */
+  virtual Status Close() {
+    if (!is_open_) {
+      return Status();
+    }
+    is_open_ = false;
+   return this->UncheckedClose();
+  };
 
   /** Opens the storage; optionally creates additional column families. */
-  virtual Status Open(std::vector<std::string> additional_cf_names = {}) = 0;
+  virtual Status Open(std::vector<std::string> additional_cf_names = {}) {
+    if (is_open_) {
+      return Status();
+    }
+    is_open_ = true;
+    return this->UncheckedOpen(additional_cf_names);
+  };
 
   /** Creates a table with the given schema. */
   virtual Status CreateTable(google::bigtable::admin::v2::Table& schema) = 0;
 
   /** Deletes a table after running the precondition. */
-  virtual Status DeleteTable(std::string table_name, std::function<Status(std::string, storage::TableMeta)>&& precondition_fn) const = 0;
+  virtual Status DeleteTable(std::string table_name, std::function<Status(std::string, storage::TableMeta)>&& precondition_fn) = 0;
   /** Returns table metadata. */
   virtual StatusOr<storage::TableMeta> GetTable(std::string table_name) const = 0;
   /** Updates table metadata (e.g. after CreateTable()). */
@@ -91,6 +110,40 @@ class Storage {
   virtual bool HasTable(std::string table_name) const = 0;
   /** Deletes a column family (may be expensive depending on implementation). */
   virtual Status DeleteColumnFamily(std::string const& cf_name) = 0;
+
+  /** Returns a view of all table metadata. */
+  virtual CachedTablesMetadataView Tables() const {
+    return Tables("");
+  }
+
+  /** Returns a view of table metadata with keys starting with prefix. */
+  virtual CachedTablesMetadataView Tables(const std::string& prefix) const = 0;
+
+  virtual StatusOr<CellStream> StreamTableFull(
+    std::string const& table_name
+  ) {
+    return this->StreamTable(table_name, false);
+  }
+
+  virtual StatusOr<CellStream> StreamTable(
+      std::string const& table_name,
+      bool prefetch_all_columns
+  ) {
+    auto all_rows_set = std::make_shared<StringRangeSet>(StringRangeSet::All());
+    return this->StreamTable(table_name, all_rows_set, prefetch_all_columns);
+  }
+
+  /**
+  * Returns a cell stream over the table for the given row set.
+  * @param table_name Table name.
+  * @param range_set Row keys to include.
+  * @param prefetch_all_columns If true, prefetch all columns per row.
+  */
+  virtual StatusOr<CellStream> StreamTable(
+      std::string const& table_name,
+      std::shared_ptr<StringRangeSet> range_set,
+      bool prefetch_all_columns
+  ) = 0;
 };
 
 }  // namespace emulator

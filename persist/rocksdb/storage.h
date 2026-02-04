@@ -8,6 +8,7 @@
 
 #include "persist/storage.h"
 #include "persist/rocksdb/storage_row_tx.h"
+#include "persist/metadata_view.h"
 #include "persist/rocksdb/column_family_stream.h"
 #include "persist/rocksdb/filtered_table_stream.h"
 #include "filter.h"
@@ -206,7 +207,7 @@ class RocksDBStorage : public Storage {
   }
 
   /** @copydoc Storage::Close */
-  virtual Status Close() {
+  virtual Status UncheckedClose() {
     if (db == nullptr) {
       return Status();
     }
@@ -234,7 +235,8 @@ class RocksDBStorage : public Storage {
   }
 
   /** @copydoc Storage::Open */
-  virtual Status Open(std::vector<std::string> additional_cf_names = {}) {
+  virtual Status UncheckedOpen(std::vector<std::string> additional_cf_names = {}) {
+    DBG("RocksDBStorage:Open call");
     options = rocksdb::Options();
     txn_options = rocksdb::TransactionDBOptions();
     woptions = rocksdb::WriteOptions();
@@ -276,6 +278,7 @@ class RocksDBStorage : public Storage {
           cf_name, rocksdb::ColumnFamilyOptions()));
     }
 
+    DBG("RocksDBStorage:Open first open");
     std::vector<CFHandle> handles;
     auto open_status = OpenDBWithRetry(options, column_families, &handles);
 
@@ -285,9 +288,10 @@ class RocksDBStorage : public Storage {
       minimal_cfs.push_back(rocksdb::ColumnFamilyDescriptor(
           rocksdb::kDefaultColumnFamilyName, rocksdb::ColumnFamilyOptions()));
 
+      DBG("RocksDBStorage:Open after failed init");
       open_status = OpenDBWithRetry(options, minimal_cfs, &handles);
       if (!open_status.ok()) {
-        DBG(absl::StrCat("RocksDBStorage:Open failed to create new DB: ", open_status.message()));
+        DBG(absl::StrCat("RocksDBStorage:Open failed to create new DB: ", open_status.message(), " on path: ", storage_config.db_path()));
         return open_status;
       }
 
@@ -297,7 +301,7 @@ class RocksDBStorage : public Storage {
           rocksdb::ColumnFamilyOptions(), storage_config.meta_column_family(), &meta_cf_handle);
 
       if (!create_cf_status.ok()) {
-        DBG(absl::StrCat("RocksDBStorage:Open failed to create meta CF: ", create_cf_status.ToString()));
+        DBG(absl::StrCat("RocksDBStorage:Open failed to create meta CF: ", create_cf_status.ToString(), " on path: ", storage_config.db_path()));
         // Clean up
         for (auto h : handles) delete h;
         delete db;
@@ -307,7 +311,7 @@ class RocksDBStorage : public Storage {
 
       handles.push_back(meta_cf_handle);
     } else if (!open_status.ok()) {
-      DBG(absl::StrCat("RocksDBStorage:Open failed: ", open_status.message()));
+      DBG(absl::StrCat("RocksDBStorage:Open failed: ", open_status.message()," on path: ", storage_config.db_path()));
       return open_status;
     }
 
@@ -352,7 +356,7 @@ class RocksDBStorage : public Storage {
       delete txn;
 
       // Close current database
-      Close();
+      UncheckedClose();
 
       // Open regular RocksDB (not TransactionDB) to add column families
       rocksdb::DB* regular_db;
@@ -387,7 +391,8 @@ class RocksDBStorage : public Storage {
       for (auto h : cf_handles) delete h;
       delete regular_db;
 
-      auto reopen_status = Open();
+      DBG("RocksDBStorage:CreateTable reopen");
+      auto reopen_status = UncheckedOpen();
       if (!reopen_status.ok()) {
         return reopen_status;
       }
@@ -429,7 +434,7 @@ class RocksDBStorage : public Storage {
   }
 
   /** @copydoc Storage::DeleteTable */
-  virtual Status DeleteTable(std::string table_name, std::function<Status(std::string, storage::TableMeta)>&& precondition_fn) const {
+  virtual Status DeleteTable(std::string table_name, std::function<Status(std::string, storage::TableMeta)>&& precondition_fn) {
     auto txn = StartRocksTransaction();
 
     std::string out;
@@ -554,7 +559,8 @@ class RocksDBStorage : public Storage {
     for (auto h : cf_handles) delete h;
     delete regular_db;
 
-    return Open();
+    DBG("RocksDBStorage:CreateTable open on ensure column families exist");
+    return UncheckedOpen();
   }
 
   template<bool with_prefix, typename T>
@@ -716,28 +722,16 @@ class RocksDBStorage : public Storage {
     inline TablesMetadataIterator<with_prefix> end() const {
       return TablesMetadataIterator<with_prefix>(std::monostate{});
     }
-
-    /** Returns vector of table names in this view. */
-    inline std::vector<std::string> names() const {
-      std::vector<std::string> tmp;
-      DBG("TablesMetadataView:names listing tables");
-      std::transform(begin(), end(), std::back_inserter(tmp), [](auto el) -> auto {
-        DBG(absl::StrCat("TablesMetadataView:names => ", std::get<0>(el)));
-        return std::get<0>(el);
-      });
-      DBG("TablesMetadataView:names end");
-      return tmp;
-    }
   };
 
   /** Returns a view of all table metadata. */
-  inline TablesMetadataView<false, RocksDBStorage> Tables() const {
-    return TablesMetadataView<false, RocksDBStorage>(this);
+  virtual CachedTablesMetadataView Tables() const override {
+    return CachedTablesMetadataView(TablesMetadataView<false, RocksDBStorage>(this));
   }
 
   /** Returns a view of table metadata with keys starting with prefix. */
-  inline TablesMetadataView<true, RocksDBStorage> Tables(const std::string& prefix) const {
-    return TablesMetadataView<true, RocksDBStorage>(this, prefix);
+  virtual CachedTablesMetadataView Tables(const std::string& prefix) const override {
+    return CachedTablesMetadataView(TablesMetadataView<true, RocksDBStorage>(this, prefix));
   }
 
   /** @copydoc Storage::DeleteColumnFamily */
@@ -766,25 +760,17 @@ class RocksDBStorage : public Storage {
     return Status();
   }
 
-  /** Returns a cell stream over all rows in the table. */
-  CellStream StreamTable(
-      std::string const& table_name
-  ) {
-    auto all_rows_set = std::make_shared<StringRangeSet>(StringRangeSet::All());
-    return StreamTable(table_name, all_rows_set);
-  }
-
   /**
    * Returns a cell stream over the table for the given row set.
    * @param table_name Table name.
    * @param range_set Row keys to include.
    * @param prefetch_all_columns If true, prefetch all columns per row.
    */
-  CellStream StreamTable(
+  virtual StatusOr<CellStream> StreamTable(
       std::string const& table_name,
       std::shared_ptr<StringRangeSet> range_set,
-      bool prefetch_all_columns = false
-  ) {
+      bool prefetch_all_columns
+  ) override {
     std::vector<std::unique_ptr<AbstractFamilyColumnStreamImpl>> iters;
     auto table = GetTable(table_name);
     auto const& m = table.value().table().column_families();
@@ -899,6 +885,9 @@ class RocksDBStorage : public Storage {
     auto status = rocksdb::Status();
     for(auto i = 0; i<5; ++i) {
       status = rocksdb::TransactionDB::Open(options, txn_options, storage_config.db_path(), column_families, handles, &db);
+      if (!status.ok()) {
+        DBG(absl::StrCat("OpenDBWithRetry failed on path '", storage_config.db_path(), "' with code: ", status.code()));
+      }
       if (status.IsIOError()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(250));
         continue;
