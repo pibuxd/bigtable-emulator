@@ -69,18 +69,31 @@ It should pass all the integration tests in Google's C++ client
 repository (google-cloud-cpp), except those that must run against
 production Bigtable.
 
+## Dependencies
+
+The Bigtable-emulator depends on `google-cloud-cpp` (which the build
+tools retrieve and build automatically) and the `abseil`
+library. Other dependencies such as `GRPC` are provided by
+`google-cloud-cpp`.
+
 ## Building
 
 Building the Bigtable emulator requires `bazel`.
 
 ```shell
-cd bigtable-emulator
 bazel build //...
 ```
+
 ## Running the Unit Tests
 
 ```shell
 bazel test //...
+```
+
+## Running clang-tidy with Bazel
+
+```shell
+bazel build --config clang-tidy //...
 ```
 
 ## Running the Emulator
@@ -125,6 +138,29 @@ cbt read my-table  # data is still there
 Example in `server.cc` and `persist/storage.h`
 
 ## `compile_commands.json`
+
+If you need to generate `compile_commands.json` for your tooling, run:
+```shell
+bazel run --config=compile-commands
+```
+
+## Development
+
+It's a good idea to set home (`$HOME/.bazelrc` on Unixes) or system `bazelrc`
+and enable compilation cache there with this line:
+```
+build --disk_cache=~/.cache/bazel/disk-cache
+```
+Note that the cache directory grows indefinitely.
+
+### Formatting the code
+
+```bash
+# On bash you neet to enable globstar with `shopt -s globstar` first
+clang-format -i -style=file -assume-filename=.clang-format **/*.cc **/*.h
+```
+
+### `compile_commands.json`
 
 If you need to generate `compile_commands.json` for your tooling, run:
 ```shell
