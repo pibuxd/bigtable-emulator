@@ -14,6 +14,7 @@
 
 #include "persist/persisted_table.h"
 #include "google/cloud/internal/make_status.h"
+#include "persist/logging.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include <cmath>
@@ -28,6 +29,10 @@ StatusOr<StringRangeSet> CreateStringRangeSet(
   StringRangeSet res;
   for (auto const& row_key : row_set.row_keys()) {
     if (row_key.size() > kMaxRowLen) {
+      LERROR(
+          "[CreateStringRangeSet] row_key longer than 4KiB row_key_size={} "
+          "max={}",
+          row_key.size(), kMaxRowLen);
       return InvalidArgumentError(
           "The row_key in row_set is longer than 4KiB",
           GCP_ERROR_INFO()
@@ -37,6 +42,7 @@ StatusOr<StringRangeSet> CreateStringRangeSet(
     }
 
     if (row_key.empty()) {
+      LERROR("[CreateStringRangeSet] row_key empty");
       return InvalidArgumentError(
           "`row_key` empty",
           GCP_ERROR_INFO().WithMetadata("row_set", row_set.DebugString()));
@@ -125,11 +131,15 @@ Status PersistedTable::ReadRows(
     }
 
     if (!row_streamer.Stream(*stream)) {
+      LERROR("[PersistedTable][ReadRows] Stream closed by client table={}",
+             name_);
       return AbortedError("Stream closed by the client.", GCP_ERROR_INFO());
     }
   }
 
   if (!row_streamer.Flush(true)) {
+    LERROR("[PersistedTable][ReadRows] Flush failed stream closed table={}",
+           name_);
     return AbortedError("Stream closed by the client.", GCP_ERROR_INFO());
   }
   DBG("[PersistedTable][ReadRows] exit table={} rows_streamed={}", name_,
@@ -143,6 +153,10 @@ Status PersistedTable::SampleRowKeys(
   DBG("[PersistedTable][SampleRowKeys] table={} pass_probability={}", name_,
       pass_probability);
   if (pass_probability <= 0.0) {
+    LERROR(
+        "[PersistedTable][SampleRowKeys] sampling probability must be "
+        "positive table={} pass_probability={}",
+        name_, pass_probability);
     return InvalidArgumentError(
         "The sampling probabality must be positive",
         GCP_ERROR_INFO().WithMetadata("provided sampling probability",
@@ -231,13 +245,24 @@ Status PersistedTable::DoMutationsWithPossibleRollback(
       "row_key_size={} mutations_count={}",
       name_, row_key, row_key.size(), mutations.size());
   if (row_key.size() > kMaxRowLen) {
+    LERROR(
+        "[PersistedTable][DoMutationsWithPossibleRollback] row_key longer "
+        "than 4KiB table={} row_key_size={} max={}",
+        name_, row_key.size(), kMaxRowLen);
     return InvalidArgumentError(
         "The row_key is longer than 4KiB",
         GCP_ERROR_INFO().WithMetadata("row_key size",
                                       absl::StrFormat("%zu", row_key.size())));
   }
 
-  auto txn = storage_->RowTransaction(name_, row_key);
+  auto maybeTxn = storage_->RowTransaction(name_, row_key);
+  if (!maybeTxn.ok()) {
+    LERROR("[PersistedTable][ReadModifyWriteRow] Failed to create row transaction status={}", maybeTxn.status());
+    return InternalError(
+      "failed to create row transaction with lock",
+      GCP_ERROR_INFO().WithMetadata("row_key", row_key));
+  }
+  auto const& txn = maybeTxn.value();
 
   for (auto const& mutation : mutations) {
     if (mutation.has_set_cell()) {
@@ -247,6 +272,10 @@ Status PersistedTable::DoMutationsWithPossibleRollback(
           absl::nullopt;
 
       if (set_cell.timestamp_micros() < -1) {
+        LERROR(
+            "[PersistedTable][DoMutationsWithPossibleRollback] timestamp "
+            "micros < -1 table={} row_key={} ts_micros={}",
+            name_, row_key, set_cell.timestamp_micros());
         return InvalidArgumentError(
             "Timestamp micros cannot be < -1.",
             GCP_ERROR_INFO().WithMetadata("mutation", mutation.DebugString()));
@@ -295,6 +324,10 @@ Status PersistedTable::DoMutationsWithPossibleRollback(
       auto cf_value_type = GetColumnFamilyType(add_to_cell.family_name());
       if (!cf_value_type.has_value() ||
           !cf_value_type.value().has_aggregate_type()) {
+        LERROR(
+            "[PersistedTable][DoMutationsWithPossibleRollback] column family "
+            "not configured for aggregation table={} row_key={} cf={}",
+            name_, row_key, add_to_cell.family_name());
         return InvalidArgumentError(
             "column family is not configured to contain aggregation cells or "
             "aggregation type not properly configured",
@@ -308,6 +341,13 @@ Status PersistedTable::DoMutationsWithPossibleRollback(
         case google::bigtable::admin::v2::Type::Aggregate::kMax:
           break;
         default:
+          LERROR(
+              "[PersistedTable][DoMutationsWithPossibleRollback] unimplemented "
+              "aggregation table={} row_key={} cf={} aggregator_case={}",
+              name_, row_key, add_to_cell.family_name(),
+              static_cast<int>(cf_value_type.value()
+                                    .aggregate_type()
+                                    .aggregator_case()));
           return UnimplementedError(
               "column family configured with unimplemented aggregation",
               GCP_ERROR_INFO()
@@ -319,6 +359,10 @@ Status PersistedTable::DoMutationsWithPossibleRollback(
       }
 
       if (!add_to_cell.has_input()) {
+        LERROR(
+            "[PersistedTable][DoMutationsWithPossibleRollback] input not set "
+            "table={} row_key={} cf={}",
+            name_, row_key, add_to_cell.family_name());
         return InvalidArgumentError("input not set",
                                     GCP_ERROR_INFO().WithMetadata(
                                         "mutation", add_to_cell.DebugString()));
@@ -327,6 +371,10 @@ Status PersistedTable::DoMutationsWithPossibleRollback(
       switch (add_to_cell.input().kind_case()) {
         case google::bigtable::v2::Value::kIntValue:
           if (!add_to_cell.input().has_int_value()) {
+            LERROR(
+                "[PersistedTable][DoMutationsWithPossibleRollback] input value "
+                "not set table={} row_key={} cf={}",
+                name_, row_key, add_to_cell.family_name());
             return InvalidArgumentError(
                 "input value not set",
                 GCP_ERROR_INFO().WithMetadata("mutation",
@@ -334,6 +382,11 @@ Status PersistedTable::DoMutationsWithPossibleRollback(
           }
           break;
         default:
+          LERROR(
+              "[PersistedTable][DoMutationsWithPossibleRollback] only int64 "
+              "supported table={} row_key={} cf={} kind_case={}",
+              name_, row_key, add_to_cell.family_name(),
+              add_to_cell.input().kind_case());
           return InvalidArgumentError(
               "only int64 values are supported",
               GCP_ERROR_INFO().WithMetadata("mutation",
@@ -354,6 +407,10 @@ Status PersistedTable::DoMutationsWithPossibleRollback(
 
       if (!add_to_cell.has_column_qualifier() ||
           !add_to_cell.column_qualifier().has_raw_value()) {
+        LERROR(
+            "[PersistedTable][DoMutationsWithPossibleRollback] column "
+            "qualifier not set table={} row_key={} cf={}",
+            name_, row_key, add_to_cell.family_name());
         return InvalidArgumentError("column qualifier not set",
                                     GCP_ERROR_INFO().WithMetadata(
                                         "mutation", add_to_cell.DebugString()));
@@ -371,6 +428,10 @@ Status PersistedTable::DoMutationsWithPossibleRollback(
 
       return Status();
     } else if (mutation.has_merge_to_cell()) {
+      LERROR(
+          "[PersistedTable][DoMutationsWithPossibleRollback] unsupported "
+          "mutation merge_to_cell table={} row_key={}",
+          name_, row_key);
       return UnimplementedError(
           "Unsupported mutation type.",
           GCP_ERROR_INFO().WithMetadata("mutation", mutation.DebugString()));
@@ -387,6 +448,13 @@ Status PersistedTable::DoMutationsWithPossibleRollback(
 
         if (end <= start &&
             delete_from_column.time_range().end_timestamp_micros() != 0) {
+          LERROR(
+              "[PersistedTable][DoMutationsWithPossibleRollback] empty or "
+              "reversed time range table={} row_key={} start_micros={} "
+              "end_micros={}",
+              name_, row_key,
+              delete_from_column.time_range().start_timestamp_micros(),
+              delete_from_column.time_range().end_timestamp_micros());
           return InvalidArgumentError(
               "empty or reversed time range: the end timestamp must be more "
               "than "
@@ -417,6 +485,10 @@ Status PersistedTable::DoMutationsWithPossibleRollback(
         return status;
       }
     } else {
+      LERROR(
+          "[PersistedTable][DoMutationsWithPossibleRollback] unsupported "
+          "mutation type table={} row_key={}",
+          name_, row_key);
       return UnimplementedError(
           "Unsupported mutation type.",
           GCP_ERROR_INFO().WithMetadata("mutation", mutation.DebugString()));
@@ -435,6 +507,10 @@ PersistedTable::ReadModifyWriteRow(
   DBG("[PersistedTable][ReadModifyWriteRow] table={} row_key={} rules_count={}",
       name_, request.row_key(), request.rules_size());
   if (request.row_key().size() > kMaxRowLen) {
+    LERROR(
+        "[PersistedTable][ReadModifyWriteRow] row_key longer than 4KiB "
+        "table={} row_key_size={} max={}",
+        name_, request.row_key().size(), kMaxRowLen);
     return InvalidArgumentError(
         "The row_key is longer than 4KiB",
         GCP_ERROR_INFO().WithMetadata(
@@ -442,12 +518,21 @@ PersistedTable::ReadModifyWriteRow(
   }
 
   if (request.row_key().empty()) {
+    LERROR("[PersistedTable][ReadModifyWriteRow] row key not set table={}",
+           name_);
     return InvalidArgumentError(
         "row key not set",
         GCP_ERROR_INFO().WithMetadata("request", request.DebugString()));
   }
 
-  auto txn = storage_->RowTransaction(name_, request.row_key());
+  auto maybeTxn = storage_->RowTransaction(name_, request.row_key());
+  if (!maybeTxn.ok()) {
+    LERROR("[PersistedTable][ReadModifyWriteRow] Failed to create row transaction status={}", maybeTxn.status());
+    return InternalError(
+      "failed to create row transaction with lock",
+      GCP_ERROR_INFO().WithMetadata("request", request.DebugString()));
+  }
+  auto const& txn = maybeTxn.value();
 
   google::bigtable::v2::ReadModifyWriteRowResponse resp;
   auto* response_row = resp.mutable_row();
@@ -456,6 +541,10 @@ PersistedTable::ReadModifyWriteRow(
   for (auto const& rule : request.rules()) {
     auto cf_type = GetColumnFamilyType(rule.family_name());
     if (!cf_type.has_value()) {
+      LERROR(
+          "[PersistedTable][ReadModifyWriteRow] column family not found "
+          "table={} row_key={} family_name={}",
+          name_, request.row_key(), rule.family_name());
       return InvalidArgumentError(
           "Column family not found",
           GCP_ERROR_INFO().WithMetadata("family_name", rule.family_name()));
@@ -527,6 +616,10 @@ PersistedTable::ReadModifyWriteRow(
       new_value = google::cloud::internal::EncodeBigEndian(result_int);
 
     } else {
+      LERROR(
+          "[PersistedTable][ReadModifyWriteRow] rule must have append_value or "
+          "increment_amount table={} row_key={} family_name={}",
+          name_, request.row_key(), rule.family_name());
       return InvalidArgumentError(
           "either append value or increment amount must be set",
           GCP_ERROR_INFO().WithMetadata("rule", rule.DebugString()));
@@ -574,6 +667,10 @@ PersistedTable::CheckAndMutateRow(
   auto const& row_key = request.row_key();
 
   if (row_key.size() > kMaxRowLen) {
+    LERROR(
+        "[PersistedTable][CheckAndMutateRow] row_key longer than 4KiB "
+        "table={} row_key_size={} max={}",
+        name_, row_key.size(), kMaxRowLen);
     return InvalidArgumentError(
         "The row_key is longer than 4KiB",
         GCP_ERROR_INFO()
@@ -583,6 +680,8 @@ PersistedTable::CheckAndMutateRow(
   }
 
   if (row_key.empty()) {
+    LERROR("[PersistedTable][CheckAndMutateRow] row key required table={}",
+           name_);
     return InvalidArgumentError(
         "row key required",
         GCP_ERROR_INFO().WithMetadata("CheckAndMutateRowRequest",
@@ -591,6 +690,10 @@ PersistedTable::CheckAndMutateRow(
 
   if (request.true_mutations_size() == 0 &&
       request.false_mutations_size() == 0) {
+    LERROR(
+        "[PersistedTable][CheckAndMutateRow] both mutations empty table={} "
+        "row_key={}",
+        name_, row_key);
     return InvalidArgumentError(
         "both true mutations and false mutations are empty",
         GCP_ERROR_INFO().WithMetadata("CheckAndMutateRowRequest",
@@ -680,6 +783,9 @@ Status PersistedTable::Update(
 
   if (!FieldMaskUtil::IsValidFieldMask<google::bigtable::admin::v2::Table>(
           to_update)) {
+    LERROR(
+        "[PersistedTable][Update] Update mask invalid table={} mask_paths={}",
+        name_, to_update.paths_size());
     return InvalidArgumentError(
         "Update mask is invalid.",
         GCP_ERROR_INFO().WithMetadata("mask", to_update.DebugString()));
@@ -690,6 +796,10 @@ Status PersistedTable::Update(
       to_update, allowed_mask, &disallowed_mask);
 
   if (disallowed_mask.paths_size() > 0) {
+    LERROR(
+        "[PersistedTable][Update] Update mask contains disallowed fields "
+        "table={} disallowed_paths={}",
+        name_, disallowed_mask.paths_size());
     return UnimplementedError(
         "Update mask contains disallowed fields.",
         GCP_ERROR_INFO().WithMetadata("mask", disallowed_mask.DebugString()));
@@ -733,6 +843,10 @@ PersistedTable::ModifyColumnFamilies(
   for (auto const& modification : request.modifications()) {
     if (modification.drop()) {
       if (new_schema.deletion_protection()) {
+        LERROR(
+            "[PersistedTable][ModifyColumnFamilies] table has deletion "
+            "protection table={} cf_id={}",
+            name_, modification.id());
         return FailedPreconditionError(
             "The table has deletion protection.",
             GCP_ERROR_INFO().WithMetadata("modification",
@@ -740,6 +854,10 @@ PersistedTable::ModifyColumnFamilies(
       }
 
       if (new_schema.mutable_column_families()->erase(modification.id()) == 0) {
+        LERROR(
+            "[PersistedTable][ModifyColumnFamilies] no such column family "
+            "(drop) table={} cf_id={}",
+            name_, modification.id());
         return NotFoundError("No such column family.",
                              GCP_ERROR_INFO().WithMetadata(
                                  "modification", modification.DebugString()));
@@ -754,6 +872,10 @@ PersistedTable::ModifyColumnFamilies(
       auto& cfs = *new_schema.mutable_column_families();
       auto cf_it = cfs.find(modification.id());
       if (cf_it == cfs.end()) {
+        LERROR(
+            "[PersistedTable][ModifyColumnFamilies] no such column family "
+            "(update) table={} cf_id={}",
+            name_, modification.id());
         return NotFoundError("No such column family.",
                              GCP_ERROR_INFO().WithMetadata(
                                  "modification", modification.DebugString()));
@@ -766,6 +888,10 @@ PersistedTable::ModifyColumnFamilies(
         effective_mask = modification.update_mask();
         if (!FieldMaskUtil::IsValidFieldMask<
                 google::bigtable::admin::v2::ColumnFamily>(effective_mask)) {
+          LERROR(
+              "[PersistedTable][ModifyColumnFamilies] update mask invalid "
+              "table={} cf_id={}",
+              name_, modification.id());
           return InvalidArgumentError(
               "Update mask is invalid.",
               GCP_ERROR_INFO().WithMetadata("modification",
@@ -775,6 +901,10 @@ PersistedTable::ModifyColumnFamilies(
         FieldMaskUtil::FromString("gc_rule", &effective_mask);
         if (!FieldMaskUtil::IsValidFieldMask<
                 google::bigtable::admin::v2::ColumnFamily>(effective_mask)) {
+          LERROR(
+              "[PersistedTable][ModifyColumnFamilies] default update mask "
+              "invalid table={} cf_id={}",
+              name_, modification.id());
           return InternalError("Default update mask is invalid.",
                                GCP_ERROR_INFO().WithMetadata(
                                    "mask", effective_mask.DebugString()));
@@ -782,6 +912,10 @@ PersistedTable::ModifyColumnFamilies(
       }
 
       if (FieldMaskUtil::IsPathInFieldMask("value_type", effective_mask)) {
+        LERROR(
+            "[PersistedTable][ModifyColumnFamilies] value_type cannot be "
+            "changed table={} cf_id={}",
+            name_, modification.id());
         return InvalidArgumentError(
             "The value_type cannot be changed after column family creation",
             GCP_ERROR_INFO().WithMetadata("mask",
@@ -796,6 +930,10 @@ PersistedTable::ModifyColumnFamilies(
       if (!new_schema.mutable_column_families()
                ->emplace(modification.id(), modification.create())
                .second) {
+        LERROR(
+            "[PersistedTable][ModifyColumnFamilies] column family already "
+            "exists table={} cf_id={}",
+            name_, modification.id());
         return AlreadyExistsError(
             "Column family already exists.",
             GCP_ERROR_INFO().WithMetadata("modification",
@@ -805,6 +943,10 @@ PersistedTable::ModifyColumnFamilies(
       new_cf_names.push_back(modification.id());
 
     } else {
+      LERROR(
+          "[PersistedTable][ModifyColumnFamilies] unsupported modification "
+          "table={} modification_id={}",
+          name_, modification.id());
       return UnimplementedError(
           "Unsupported modification.",
           GCP_ERROR_INFO().WithMetadata("modification",
@@ -839,6 +981,10 @@ Status PersistedTable::DropRowRange(
       request.has_delete_all_data_from_table());
   if (!request.has_row_key_prefix() &&
       !request.has_delete_all_data_from_table()) {
+    LERROR(
+        "[PersistedTable][DropRowRange] neither row prefix nor delete_all set "
+        "table={}",
+        name_);
     return InvalidArgumentError(
         "Neither row prefix nor delete all data from table is set",
         GCP_ERROR_INFO().WithMetadata("DropRowRange request",
@@ -846,6 +992,10 @@ Status PersistedTable::DropRowRange(
   }
 
   if (request.has_delete_all_data_from_table()) {
+    LERROR(
+        "[PersistedTable][DropRowRange] delete_all_data_from_table not "
+        "implemented table={}",
+        name_);
     return UnimplementedError(
         "delete_all_data_from_table not yet implemented for RocksDB storage",
         GCP_ERROR_INFO());
@@ -853,6 +1003,10 @@ Status PersistedTable::DropRowRange(
 
   auto const& row_key_prefix = request.row_key_prefix();
   if (row_key_prefix.size() > kMaxRowLen) {
+    LERROR(
+        "[PersistedTable][DropRowRange] row_key_prefix longer than 4KiB "
+        "table={} prefix_size={} max={}",
+        name_, row_key_prefix.size(), kMaxRowLen);
     return InvalidArgumentError(
         "The row_key_prefix is longer than 4KiB",
         GCP_ERROR_INFO().WithMetadata(
@@ -861,12 +1015,19 @@ Status PersistedTable::DropRowRange(
   }
 
   if (row_key_prefix.empty()) {
+    LERROR(
+        "[PersistedTable][DropRowRange] row prefix empty table={}",
+        name_);
     return InvalidArgumentError(
         "Row prefix provided is empty.",
         GCP_ERROR_INFO().WithMetadata("DropRowRange request",
                                       request.DebugString()));
   }
 
+  LERROR(
+      "[PersistedTable][DropRowRange] row_key_prefix deletion not "
+      "implemented table={} prefix_size={}",
+      name_, row_key_prefix.size());
   return UnimplementedError(
       "row_key_prefix deletion not yet implemented for RocksDB storage",
       GCP_ERROR_INFO().WithMetadata("row_key_prefix", row_key_prefix));

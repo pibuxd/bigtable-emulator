@@ -84,7 +84,7 @@ class Storage {
   virtual ~Storage() = default;
 
   /** Starts a row-scoped transaction. */
-  virtual std::unique_ptr<StorageRowTX> RowTransaction(
+  virtual StatusOr<std::unique_ptr<StorageRowTX>> RowTransaction(
       std::string const& table_name, std::string const& row_key) = 0;
 
   /** Closes the storage and releases resources. */

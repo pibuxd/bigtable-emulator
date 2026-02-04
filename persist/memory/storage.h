@@ -46,15 +46,16 @@ class MemoryStorage : public Storage {
 
   /** Looks up a table by name; returns error if not found. */
   StatusOr<std::shared_ptr<Table>> FindTable(std::string const& table_name){
-      {std::lock_guard<std::mutex> lock(mu_);
-  auto it = table_by_name_.find(table_name);
-  if (it == table_by_name_.end()) {
-    return NotFoundError("No such table.", GCP_ERROR_INFO().WithMetadata(
-                                               "table_name", table_name));
-  }
-  return it->second;
-}
-};  // namespace emulator
+    std::lock_guard<std::mutex> lock(mu_);
+    auto it = table_by_name_.find(table_name);
+    if (it == table_by_name_.end()) {
+      LERROR("[MemoryStorage][FindTable] No such table table_name={}",
+            table_name);
+      return NotFoundError("No such table.", GCP_ERROR_INFO().WithMetadata(
+                                                  "table_name", table_name));
+    }
+    return it->second;
+  };
 
 public:
 /** Default constructor for in-memory storage (no persistence, no config). */
@@ -99,16 +100,17 @@ virtual Status UncheckedClose() override {
 };
 
 /** Starts a row-scoped transaction for the given table and row key. */
-virtual std::unique_ptr<StorageRowTX> RowTransaction(
+virtual StatusOr<std::unique_ptr<StorageRowTX>> RowTransaction(
     std::string const& table_name, std::string const& row_key) override {
   DBG("[MemoryStorage][RowTransaction] table={} row={}", table_name,
       row_key);
   auto maybe_table = FindTable(table_name);
-  // FIXME: Maybe this should return status somewhere instead of doing assert
-  // and failing
-  assert(maybe_table.ok());
-  return std::unique_ptr<MemoryStorageRowTX>(
-      new MemoryStorageRowTX(table_name, row_key, this, maybe_table.value()));
+  LERROR("[MemoryStorage][RowTransaction] Failed to find table table={}", table_name);
+  if (!maybe_table.ok()) {
+    return maybe_table.status();
+  }
+  return StatusOr<std::unique_ptr<StorageRowTX>>(std::unique_ptr<MemoryStorageRowTX>(
+      new MemoryStorageRowTX(table_name, row_key, this, maybe_table.value())));
 };
 
 /** Opens the storage (no-op for in-memory storage). */
@@ -131,6 +133,8 @@ virtual Status CreateTable(
     std::lock_guard<std::mutex> lock(mu_);
     auto const& table_name = schema.name();
     if (!table_by_name_.emplace(table_name, *maybe_table).second) {
+      LERROR("[MemoryStorage][CreateTable] Table already exists table_name={}",
+             table_name);
       return google::cloud::internal::AlreadyExistsError(
           "Table already exists.",
           GCP_ERROR_INFO().WithMetadata("table_name", table_name));
@@ -149,6 +153,8 @@ virtual Status DeleteTable(
     std::lock_guard<std::mutex> lock(mu_);
     auto it = table_by_name_.find(table_name);
     if (it == table_by_name_.end()) {
+      LERROR("[MemoryStorage][DeleteTable] No such table table_name={}",
+             table_name);
       return NotFoundError("No such table.", GCP_ERROR_INFO().WithMetadata(
                                                  "table_name", table_name));
     }
@@ -171,6 +177,8 @@ virtual StatusOr<storage::TableMeta> GetTable(
     std::lock_guard<std::mutex> lock(mu_);
     auto it = table_by_name_.find(table_name);
     if (it == table_by_name_.end()) {
+      LERROR("[MemoryStorage][GetTable] No such table table_name={}",
+             table_name);
       return NotFoundError("No such table.", GCP_ERROR_INFO().WithMetadata(
                                                  "table_name", table_name));
     }
@@ -218,7 +226,6 @@ virtual StatusOr<CellStream> StreamTable(
   DBG("[MemoryStorage][StreamTable] table={} prefetch_all_columns={}",
       table_name, prefetch_all_columns);
   auto maybe_table = FindTable(table_name);
-  // FIXME: Propagate error instead of failing on assert
   if (!maybe_table.ok()) {
     return maybe_table.status();
   }

@@ -12,6 +12,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/types/optional.h"
 #include "filter.h"
+#include "persist/logging.h"
 #include "persist/metadata_view.h"
 #include "persist/proto/storage.pb.h"
 #include "persist/rocksdb/column_family_stream.h"
@@ -201,10 +202,10 @@ class RocksDBStorage : public Storage {
   }
 
   /** @copydoc Storage::RowTransaction */
-  virtual std::unique_ptr<StorageRowTX> RowTransaction(
+  virtual StatusOr<std::unique_ptr<StorageRowTX>> RowTransaction(
       std::string const& table_name, std::string const& row_key) {
-    return std::unique_ptr<RocksDBStorageRowTX>(new RocksDBStorageRowTX(
-        table_name, row_key, StartRocksTransaction(), this));
+    return StatusOr<std::unique_ptr<StorageRowTX>>(std::unique_ptr<RocksDBStorageRowTX>(new RocksDBStorageRowTX(
+        table_name, row_key, StartRocksTransaction(), this)));
   }
 
   /** @copydoc Storage::Close */
@@ -316,6 +317,10 @@ class RocksDBStorage : public Storage {
             "error={}",
             storage_config.db_path(), create_cf_status.ToString());
         // Clean up
+        LERROR(
+            "[RocksDBStorage][UncheckedOpen] Failed to create meta column "
+            "family path={} status={}",
+            storage_config.db_path(), create_cf_status.ToString());
         for (auto h : handles) delete h;
         delete db;
         db = nullptr;
@@ -338,6 +343,10 @@ class RocksDBStorage : public Storage {
     }
 
     if (metaHandle == nullptr) {
+      LERROR(
+          "[RocksDBStorage][UncheckedOpen] Meta column family not found "
+          "path={} meta_cf_name={}",
+          storage_config.db_path(), storage_config.meta_column_family());
       return StorageError("Meta column family not found after opening");
     }
 
@@ -350,6 +359,8 @@ class RocksDBStorage : public Storage {
 
     auto key = rocksdb::Slice(schema.name());
     if (KeyExists(txn, metaHandle, key)) {
+      LERROR("[RocksDBStorage][CreateTable] Table already exists table_name={}",
+             schema.name());
       return AlreadyExistsError(
           "Table already exists.",
           GCP_ERROR_INFO().WithMetadata("table_name", schema.name()));
@@ -380,6 +391,10 @@ class RocksDBStorage : public Storage {
       auto list_status = rocksdb::DB::ListColumnFamilies(
           options, storage_config.db_path(), &cf_names);
       if (!list_status.ok()) {
+        LERROR(
+            "[RocksDBStorage][CreateTable] Failed to list CFs path={} "
+            "status={}",
+            storage_config.db_path(), list_status.ToString());
         return StorageError("Failed to list CFs during CF addition");
       }
 
@@ -393,6 +408,10 @@ class RocksDBStorage : public Storage {
           rocksdb::DB::Open(options, storage_config.db_path(), existing_cfs,
                             &cf_handles, &regular_db);
       if (!db_status.ok()) {
+        LERROR(
+            "[RocksDBStorage][CreateTable] Failed to open regular DB path={} "
+            "status={}",
+            storage_config.db_path(), db_status.ToString());
         return StorageError("Failed to open regular DB for CF addition: " +
                             db_status.ToString());
       }
@@ -402,6 +421,10 @@ class RocksDBStorage : public Storage {
         auto create_status = regular_db->CreateColumnFamily(
             rocksdb::ColumnFamilyOptions(), cf_name, &new_handle);
         if (!create_status.ok()) {
+          LERROR(
+              "[RocksDBStorage][CreateTable] Failed to create column family "
+              "path={} cf_name={} status={}",
+              storage_config.db_path(), cf_name, create_status.ToString());
           for (auto h : cf_handles) delete h;
           delete regular_db;
           return StorageError("Failed to create column family " + cf_name +
@@ -447,6 +470,10 @@ class RocksDBStorage : public Storage {
         if (!missing_list.empty()) missing_list += ", ";
         missing_list += cf;
       }
+      LERROR(
+          "[RocksDBStorage][CreateTable] Column families do not exist "
+          "table_name={} missing_cfs={}",
+          schema.name(), missing_list);
       return InvalidArgumentError(
           "Column families do not exist. Please restart the emulator to create "
           "them.",
@@ -473,14 +500,25 @@ class RocksDBStorage : public Storage {
         NotFoundError("No such table.",
                       GCP_ERROR_INFO().WithMetadata("table_name", table_name)));
     if (!status.ok()) {
+      LERROR("[RocksDBStorage][GetTableMeta] Get table failed table_name={} "
+             "status={}",
+             table_name, status.message());
       return Rollback(txn, status);
     }
     auto const meta = DeserializeTableMeta(std::move(out));
     if (!meta.ok()) {
+      LERROR(
+          "[RocksDBStorage][DeleteTableMeta] DeserializeTableMeta failed "
+          "table_name={} status={}",
+          table_name, meta.status().message());
       return Rollback(txn, meta.status());
     }
     auto const precondition_status = precondition_fn(table_name, meta.value());
     if (!precondition_status.ok()) {
+      LERROR(
+          "[RocksDBStorage][DeleteTableMeta] precondition failed table_name={} "
+          "status={}",
+          table_name, precondition_status.message());
       return Rollback(txn, precondition_status);
     }
 
@@ -490,6 +528,10 @@ class RocksDBStorage : public Storage {
                       GCP_ERROR_INFO().WithMetadata("table_name", table_name)));
 
     if (!delete_status.ok()) {
+      LERROR(
+          "[RocksDBStorage][DeleteTableMeta] Delete table failed table_name={} "
+          "status={}",
+          table_name, delete_status.message());
       return Rollback(txn, delete_status);
     }
     return Commit(txn);
@@ -512,6 +554,8 @@ class RocksDBStorage : public Storage {
         NotFoundError("No such table.",
                       GCP_ERROR_INFO().WithMetadata("table_name", table_name)));
     if (!status.ok()) {
+      LERROR("[RocksDBStorage][GetTable] No such table table_name={} status={}",
+             table_name, status.message());
       return status;
     }
     return DeserializeTableMeta(std::move(out));
@@ -565,6 +609,10 @@ class RocksDBStorage : public Storage {
     auto list_status = rocksdb::DB::ListColumnFamilies(
         options, storage_config.db_path(), &existing_cf_names);
     if (!list_status.ok()) {
+      LERROR(
+          "[RocksDBStorage][EnsureColumnFamiliesExist] Failed to list CFs "
+          "path={} status={}",
+          storage_config.db_path(), list_status.ToString());
       return StorageError("Failed to list CFs during CF addition");
     }
 
@@ -577,6 +625,10 @@ class RocksDBStorage : public Storage {
     auto db_status = rocksdb::DB::Open(options, storage_config.db_path(),
                                        existing_cfs, &cf_handles, &regular_db);
     if (!db_status.ok()) {
+      LERROR(
+          "[RocksDBStorage][EnsureColumnFamiliesExist] Failed to open DB "
+          "path={} status={}",
+          storage_config.db_path(), db_status.ToString());
       return StorageError("Failed to open regular DB for CF addition: " +
                           db_status.ToString());
     }
@@ -586,6 +638,10 @@ class RocksDBStorage : public Storage {
       auto create_status = regular_db->CreateColumnFamily(
           rocksdb::ColumnFamilyOptions(), cf_name, &new_handle);
       if (!create_status.ok()) {
+        LERROR(
+            "[RocksDBStorage][EnsureColumnFamiliesExist] Failed to create CF "
+            "path={} cf_name={} status={}",
+            storage_config.db_path(), cf_name, create_status.ToString());
         for (auto h : cf_handles) delete h;
         delete regular_db;
         return StorageError("Failed to create column family " + cf_name + ": " +
@@ -856,6 +912,8 @@ class RocksDBStorage : public Storage {
   inline StatusOr<storage::RowData> DeserializeRow(std::string&& data) const {
     storage::RowData row;
     if (!row.ParseFromString(data)) {
+      LERROR("[RocksDBStorage][DeserializeRow] ParseFromString failed data_len={}",
+             data.size());
       return StorageError("DeserializeRow()");
     }
     return row;
@@ -873,6 +931,9 @@ class RocksDBStorage : public Storage {
       std::string&& data) {
     storage::TableMeta meta;
     if (!meta.ParseFromString(data)) {
+      LERROR("[RocksDBStorage][DeserializeTableMeta] ParseFromString failed "
+             "data_len={}",
+             data.size());
       return StorageError("DeserializeTableMeta()");
     }
     assert(meta.has_table());
@@ -924,7 +985,7 @@ class RocksDBStorage : public Storage {
                                             storage_config.db_path(),
                                             column_families, handles, &db);
       if (!status.ok()) {
-        DBG("[OpenDBWithRetry] failed path={} code={}", storage_config.db_path(),
+        LWARN("[OpenDBWithRetry] failed DB open with retry path={} code={}", storage_config.db_path(),
             (uint64_t)status.code());
       }
       if (status.IsIOError()) {
@@ -939,6 +1000,7 @@ class RocksDBStorage : public Storage {
 
   /** Builds a storage error status. */
   static inline Status StorageError(std::string&& operation) {
+    LERROR("[RocksDBStorage][StorageError] operation={}", operation);
     return InternalError("Storage error",
                          GCP_ERROR_INFO().WithMetadata("operation", operation));
   }
@@ -947,6 +1009,7 @@ class RocksDBStorage : public Storage {
   inline Status GetStatus(rocksdb::Status status, std::string&& operation,
                           Status&& not_found_status) const {
     if (status.IsNotFound()) {
+      LERROR("[RocksDBStorage][GetStatus] not found operation={}", operation);
       return not_found_status;
     }
     if (!status.ok()) {

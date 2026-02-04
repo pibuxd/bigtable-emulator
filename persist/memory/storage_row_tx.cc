@@ -64,6 +64,10 @@ Status MemoryStorageRowTX::DeleteRowFromColumnFamily(
 
   auto column_family_it = table_->find(column_family);
   if (column_family_it == table_->end()) {
+    LERROR(
+        "[MemoryStorageRowTX][DeleteRowFromColumnFamily] column family not "
+        "found table={} row={} cf={}",
+        table_name_, row_key_, column_family);
     return NotFoundError(
         "column family not found in table",
         GCP_ERROR_INFO().WithMetadata("column family", column_family));
@@ -73,6 +77,10 @@ Status MemoryStorageRowTX::DeleteRowFromColumnFamily(
   if (column_family_it->second->find(row_key_) ==
       column_family_it->second->end()) {
     // The row does not exist
+    LERROR(
+        "[MemoryStorageRowTX][DeleteRowFromColumnFamily] row key not found "
+        "table={} row={} cf={}",
+        table_name_, row_key_, column_family_it->first);
     return NotFoundError(
         "row key is not found in column family",
         GCP_ERROR_INFO()
@@ -209,6 +217,10 @@ Status MemoryStorageRowTX::DeleteRowFromAllColumnFamilies() {
   if (row_existed) {
     return Status();
   }
+  LERROR(
+      "[MemoryStorageRowTX][DeleteRowFromAllColumnFamilies] row not found "
+      "table={} row={}",
+      table_name_, row_key_);
   return NotFoundError("row not found in table",
                        GCP_ERROR_INFO().WithMetadata("row", row_key_));
 }
