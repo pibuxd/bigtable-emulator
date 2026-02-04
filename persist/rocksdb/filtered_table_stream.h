@@ -17,17 +17,19 @@ namespace bigtable {
 namespace emulator {
 
 /**
- * Merge of multiple RocksDB column family streams with filter pushdown.
- *
- * Analogous to FilteredTableStream in the in-memory path: groups multiple
- * AbstractFamilyColumnStreamImpl streams into one MergeCellStreams. Used by
- * RocksDB storage to serve ReadRows. Differs from FilteredTableStream by
- * holding std::unique_ptr<AbstractFamilyColumnStreamImpl> instead of
- * std::unique_ptr<FilteredColumnFamilyStream>, so the same merge logic works
- * with RocksDB-backed streams.
- *
- * TODO: Could be turned into a templated class shared with the in-memory path.
- */
+  * This is very similar to FilteredTableStream.
+  * We didn't want to move all the files to persist/ directory, because that would make diff
+  * for persistence implementation unreadable. Currently persist/memory offers thin wrapper around Table
+  * class (used previously for in-memory storage). All other required logic was extracted from Table class.
+  * This includes this utility class.
+  *
+  * In Table this class is used only to enable testing. We use it to group multiple streams into one in RocksDB storage implementation.
+  * It differs from FilteredTableStream by the unique ptr type.
+  *    (Here)  :  std::vector<std::unique_ptr<AbstractFamilyColumnStreamImpl>>
+  *    (There) :  std::vector<std::unique_ptr<FilteredColumnFamilyStream>>
+  *
+  * TODO: This could be turned into templated class in the future
+  */
 class StorageFitleredTableStream : public MergeCellStreams {
  public:
   /**
