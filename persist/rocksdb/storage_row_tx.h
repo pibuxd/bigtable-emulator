@@ -72,9 +72,17 @@ class RocksDBStorageRowTX : public StorageRowTX {
   std::string const table_name_;
   RocksDBStorage* db_;
 
+  /** Key used to fetch row data:[column_family, column_qualifier]  */
   using row_data_key_t = std::tuple<std::string, std::string>;
+  /** Maps [column_family, column_qualifier] into row data */
   std::map<row_data_key_t, storage::RowData> lazy_row_data_;
 
+  /**
+  * We use field lazy_row_data_ to simulate alterations of rows.
+  * This is very simplistic form of ORM.
+  * When we write specific row value we need to load the row data first, and then write it altered as part of the rocksdb::Transaction scope.
+  * Private lazy methods are helpers to make data access esier.
+  */
   void lazyRowDataRemoveColumnFamily(std::string const& column_family);
   bool hasLazyRowData(std::string const& column_family,
                       std::string const& column_qualifier);

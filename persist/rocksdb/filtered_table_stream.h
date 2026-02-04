@@ -17,9 +17,18 @@ namespace bigtable {
 namespace emulator {
 
 /**
- * Merge cell stream over multiple column families using
- * AbstractFamilyColumnStreamImpl. Supports FamilyNameRegex and ColumnRange
- * filters by pruning streams.
+ * This is very similar to FilteredTableStream.
+ * We didn't want to move all the files to persist/ directory, because that would make diff
+ * for persistence implementation unreadable. Currently persist/memory offers thin wrapper around Table
+ * class (used previously for in-memory storage). All other required logic was extracted from Table class.
+ * This includes this utility class.
+ *
+ * In Table this class is used only to enable testing. We use it to group multiple streams into one in RocksDB storage implementation.
+ * It differs from FilteredTableStream by the unique ptr type.
+ *    (Here)  :  std::vector<std::unique_ptr<AbstractFamilyColumnStreamImpl>>
+ *    (There) :  std::vector<std::unique_ptr<FilteredColumnFamilyStream>>
+ *
+ * TODO: This could be turned into templated class in the future
  */
 class StorageFitleredTableStream : public MergeCellStreams {
  public:
