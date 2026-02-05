@@ -80,6 +80,9 @@ git_repository(
     patch_args = ["-p1"],
 )
 
+# fmtlog is required for utils/logging.h
+# fmtlog uses fmt under the hood
+bazel_dep(name = "fmt", version = "12.1.0")
 git_repository(
     name = "fmtlog",
     remote = "https://github.com/MengRao/fmtlog.git",
@@ -97,7 +100,6 @@ cc_library(
 )
 
 bazel_dep(name = "rocksdb", version = "9.11.2")
-bazel_dep(name = "fmt", version = "12.1.0")
 
 git_repository(
     name = "bazel_clang_tidy",
