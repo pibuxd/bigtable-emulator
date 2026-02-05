@@ -27,6 +27,16 @@
 
 ## Persistent storage patch
 
+**👋 Persistence was added to the emulator by the following contributors:**
+* [⭐⭐ Piotr Styczyński](https://github.com/styczynski)
+  * Majority of the code for storage interface and tests
+* [⭐ Piotr Bublik](https://github.com/pibuxd)
+  * Implemented all core data operations (MutateRow, ReadRows, CheckAndMutateRow, ReadModifyWriteRow)
+  * Solved RocksDB TransactionDB column family creation constraints
+  * Implemented server endpoints to use `PersistentTable` implementation
+* [Mikołaj Woliński](https://github.com/mik04rm)
+  * Minimal README updates
+
 ### Implementation
 
 Main implementation is in `persist/storage.h`. The storage class is abstract as well as the row transaction model.
