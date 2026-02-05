@@ -17,6 +17,7 @@
 #include "persist/proto/storage.pb.h"
 #include "persist/rocksdb/column_family_stream.h"
 #include "persist/rocksdb/filtered_table_stream.h"
+#include "persist/rocksdb/key_encoding.h"
 #include "persist/rocksdb/storage_row_tx.h"
 #include "persist/storage.h"
 #include "rocksdb/db.h"
@@ -76,41 +77,11 @@ class RocksDBStorage : public Storage {
   virtual ~RocksDBStorage() { Close(); }
 
   /**
-   * Builds the RocksDB key for a (table, row, column_qualifier).
-   */
-  static inline std::string storageKey(std::string const& table_name,
-                                       std::string const& row_key,
-                                       std::string const& column_qualifier) {
-    return absl::StrCat(table_name, "|", row_key, "|", column_qualifier);
-  }
-
-  /**
-   * Builds the RocksDB key prefix for a (table, row) to iterate all columns.
-   */
-  static inline std::string storageKeyPartial(std::string const& table_name,
-                                              std::string const& row_key) {
-    return absl::StrCat(table_name, "|", row_key);
-  }
-
-  /**
    * Parses a RocksDB key into (table_name, row_key, column_qualifier).
    */
   inline std::tuple<std::string, std::string, std::string> RawDataParseRowKey(
-      rocksdb::Iterator* iter) {
-    auto const key = iter->key().ToString();
-    std::vector<std::string_view> result;
-    auto left = key.begin();
-    for (auto it = left; it != key.end(); ++it) {
-      if (*it == '|') {
-        result.emplace_back(&*left, it - left);
-        left = it + 1;
-      }
-    }
-    if (left != key.end()) {
-      result.emplace_back(&*left, key.end() - left);
-    }
-    return std::make_tuple(std::string(result[0]), std::string(result[1]),
-                           std::string(result[2]));
+      rocksdb::Iterator* iter) const {
+    return key_encoding_.ParseRowKey(iter->key().ToString());
   }
 
   /**
@@ -121,7 +92,7 @@ class RocksDBStorage : public Storage {
   inline void RawDataSeekPrefixed(rocksdb::Iterator* iter,
                                   std::string const& table_name,
                                   std::string const& row_prefix) {
-    iter->Seek(rocksdb::Slice(storageKeyPartial(table_name, row_prefix)));
+    iter->Seek(rocksdb::Slice(key_encoding_.StorageKeyPartial(table_name, row_prefix)));
   }
 
   /**
@@ -135,7 +106,7 @@ class RocksDBStorage : public Storage {
                            std::string&& data) {
     auto const& cf = column_families_handles_map[column_family];
     return GetStatus(txn->Put(cf,
-                              rocksdb::Slice(storageKey(table_name, row_key,
+                              rocksdb::Slice(key_encoding_.StorageKey(table_name, row_key,
                                                         column_qualifier)),
                               rocksdb::Slice(std::move(data))),
                      "Update commit row");
@@ -153,7 +124,7 @@ class RocksDBStorage : public Storage {
     rocksdb::ReadOptions roptions;
     auto const& cf = column_families_handles_map[column_family];
     return GetStatus(txn->Get(roptions, cf,
-                              rocksdb::Slice(storageKey(table_name, row_key,
+                              rocksdb::Slice(key_encoding_.StorageKey(table_name, row_key,
                                                         column_qualifier)),
                               out),
                      "Load commit row", Status());
@@ -170,7 +141,7 @@ class RocksDBStorage : public Storage {
     auto const& cf = column_families_handles_map[column_family];
     return GetStatus(
         txn->Delete(cf, rocksdb::Slice(
-                            storageKey(table_name, row_key, column_qualifier))),
+          key_encoding_.StorageKey(table_name, row_key, column_qualifier))),
         "Delete row column");
   }
 
@@ -185,7 +156,7 @@ class RocksDBStorage : public Storage {
     auto const& cf = column_families_handles_map[column_family];
     // Need to iterate through the columns
     auto it = txn->GetIterator(roptions, cf);
-    for (it->Seek(rocksdb::Slice(storageKeyPartial(table_name, row_key)));
+    for (it->Seek(rocksdb::Slice(key_encoding_.StorageKeyPartial(table_name, row_key)));
          it->Valid(); it->Next()) {
       auto const& [k_table_name, k_row_key, _] = RawDataParseRowKey(it);
       if (k_table_name != table_name || k_row_key != row_key) {
@@ -887,6 +858,9 @@ class RocksDBStorage : public Storage {
  private:
   /** RocksDB configuration. */
   storage::StorageRocksDBConfig storage_config;
+
+  /** Key encoding for storage keys (delimiter='|' by default, backslash for esacapes). */
+  const KeyEncoding<'|', '\\', false> key_encoding_;
 
   /** RocksDB options. */
   rocksdb::Options options;

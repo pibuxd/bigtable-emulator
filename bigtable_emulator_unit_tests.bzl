@@ -26,6 +26,7 @@ bigtable_emulator_unit_tests = [
     "mutations_test.cc",
     "range_set_test.cc",
     "table_test.cc",
+    "persist/rocksdb/key_encoding_test.cc",
     "persist/rocksdb/storage_test.cc",
     "cluster_test.cc",
     "persist/memory/storage_test.cc",
