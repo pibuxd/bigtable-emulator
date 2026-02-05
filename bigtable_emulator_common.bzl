@@ -33,7 +33,7 @@ bigtable_emulator_common_hdrs = [
     "persist/rocksdb/column_family_stream.h",
     "persist/rocksdb/filtered_table_stream.h",
     "persist/persisted_table.h",
-    "persist/test_utils.h",
+    "persist/utils/test_utils.h",
     "persist/metadata_view.h",
     "persist/memory/storage.h",
     "persist/memory/storage_row_tx.h",

@@ -19,7 +19,7 @@
  */
 
 #include "persist/memory/storage.h"
-#include "persist/test_utils.h"
+#include "persist/utils/test_utils.h"
 
 namespace google {
 namespace cloud {

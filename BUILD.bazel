@@ -15,7 +15,7 @@
 load(":bigtable_emulator_common.bzl", "bigtable_emulator_common_hdrs", "bigtable_emulator_common_srcs")
 load(":bigtable_emulator_programs.bzl", "bigtable_emulator_programs")
 load(":bigtable_emulator_test_common.bzl", "bigtable_emulator_test_common_hdrs", "bigtable_emulator_test_common_srcs")
-load(":bigtable_emulator_unit_tests.bzl", "bigtable_emulator_unit_tests")
+load(":bigtable_emulator_unit_tests.bzl", "bigtable_emulator_unit_tests", "bigtable_emulator_unit_tests_common")
 load(":funcs.bzl", "gen_cc_tests")
 
 proto_library(
@@ -68,6 +68,7 @@ cc_binary(
 
 gen_cc_tests(
     srcs = bigtable_emulator_unit_tests,
+    common = bigtable_emulator_unit_tests_common,
     deps = [
         ":bigtable_emulator_common",
         "@com_github_grpc_grpc//:grpc",

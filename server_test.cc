@@ -14,7 +14,7 @@
 
 #include "server.h"
 #include "persist/rocksdb/storage.h"
-#include "persist/test_utils.h"
+#include "persist/utils/test_utils.h"
 #include "google/cloud/testing_util/status_matchers.h"
 #include <google/bigtable/admin/v2/bigtable_table_admin.grpc.pb.h>
 #include <google/bigtable/admin/v2/bigtable_table_admin.pb.h>

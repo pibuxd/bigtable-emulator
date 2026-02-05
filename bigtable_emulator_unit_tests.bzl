@@ -12,6 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+bigtable_emulator_unit_tests_common = [
+    "persist/utils/test_utils.cc",
+]
+
 bigtable_emulator_unit_tests = [
     "column_family_test.cc",
     "conditional_mutations_test.cc",
