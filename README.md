@@ -1,5 +1,30 @@
 # Single node, Persistent Emulator for Google Bigtable
 
+## Table of Contents
+
+- [🗄️ Single node, Persistent Emulator for Google Bigtable](#single-node-persistent-emulator-for-google-bigtable)
+- [💾 Persistent storage patch](#persistent-storage-patch)
+  - [⚙️ Implementation](#implementation)
+  - [🧠 MemoryStorage: how data is stored](#memorystorage-how-data-is-stored)
+  - [🪨 RocksDBStorage: how data is stored](#rocksdbstorage-how-data-is-stored)
+  - [🔌 CustomStorage: implementing custom storage interface](#customstorage-implementing-custom-storage-interface)
+  - [🧪 Testing](#testing)
+  - [📋 What's left for the future (TODO)?](#whats-left-for-the-future-todo)
+- [ℹ️ About](#about)
+- [📦 Dependencies](#dependencies)
+- [🏗️ Building](#building)
+- [▶️ Running the Unit Tests](#running-the-unit-tests)
+- [🔍 Running clang-tidy with Bazel](#running-clang-tidy-with-bazel)
+- [🚀 Running the Emulator](#running-the-emulator)
+- [🔗 Connecting to the Emulator](#connecting-to-the-emulator)
+- [💾 Using RocksDB](#using-rocksdb)
+- [📝 compile_commands.json](#compile_commandsjson)
+- [🛠️ Development](#development)
+  - [✨ Formatting the code](#formatting-the-code)
+  - [📝 compile_commands.json](#compile_commandsjson-1)
+- [🤝 Contributing changes](#contributing-changes)
+- [⚖️ Licensing](#licensing)
+
 ## Persistent storage patch
 
 ### Implementation
