@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "persist/storage.h"
 #include "server.h"
+#include "google/cloud/internal/make_status.h"
+#include "google/cloud/status_or.h"
+#include "absl/strings/str_cat.h"
 #include "cluster.h"
 #include "row_streamer.h"
 #include "to_grpc_status.h"
-#include "google/cloud/internal/make_status.h"
-#include "google/cloud/status_or.h"
 #include <google/bigtable/admin/v2/bigtable_table_admin.grpc.pb.h>
 #include <google/bigtable/admin/v2/bigtable_table_admin.pb.h>
 #include <google/bigtable/admin/v2/table.pb.h>
@@ -26,7 +28,6 @@
 #include <google/longrunning/operations.pb.h>
 #include <google/protobuf/empty.pb.h>
 #include <google/protobuf/util/time_util.h>
-#include "absl/strings/str_cat.h"
 #include <grpcpp/impl/call_op_set.h>
 #include <grpcpp/security/server_credentials.h>
 #include <grpcpp/server.h>
@@ -39,8 +40,8 @@
 #include <string>
 #include <utility>
 
-#include "rocksdb/db.h"
-#include "rocksdb/options.h"
+#include "persist/storage.h"
+#include "persist/rocksdb/storage.h"
 
 namespace google {
 namespace cloud {
@@ -107,7 +108,7 @@ class EmulatorService final : public btproto::Bigtable::Service {
       response.Clear();
 
       auto status = (*maybe_table)
-                        ->DoMutationsWithPossibleRollbackLocked(
+                        ->DoMutationsWithPossibleRollback(
                             entry.row_key(), entry.mutations());
 
       auto* response_entry = response.add_entries();
@@ -132,6 +133,26 @@ class EmulatorService final : public btproto::Bigtable::Service {
       btproto::CheckAndMutateRowRequest const* request,
       btproto::CheckAndMutateRowResponse* response) override {
     auto maybe_table = cluster_->FindTable(request->table_name());
+    if (!maybe_table) {
+      return ToGrpcStatus(maybe_table.status());
+    }
+
+    auto maybe_response = (*maybe_table)->CheckAndMutateRow(*request);
+    if (!maybe_response.ok()) {
+      return ToGrpcStatus(maybe_response.status());
+    }
+
+    *response = std::move(maybe_response.value());
+
+    return grpc::Status::OK;
+  }
+
+  // Old method
+  grpc::Status OLDCheckAndMutateRow(
+      grpc::ServerContext* /* context */,
+      btproto::CheckAndMutateRowRequest const* request,
+      btproto::CheckAndMutateRowResponse* response) {
+    auto maybe_table = cluster_->FindLegacyTable(request->table_name());
     if (!maybe_table) {
       return ToGrpcStatus(maybe_table.status());
     }
@@ -337,9 +358,9 @@ class EmulatorTableService final : public btadmin::BigtableTableAdmin::Service {
 
 class DefaultEmulatorServer : public EmulatorServer {
  public:
-  DefaultEmulatorServer(std::string const& host, std::uint16_t port)
+  DefaultEmulatorServer(std::string const& host, std::uint16_t port, std::shared_ptr<Storage> storage)
       : bound_port_(port),
-        cluster_(std::make_shared<Cluster>()),
+        cluster_(std::make_shared<Cluster>(storage)),
         bt_service_(cluster_),
         table_service_(cluster_) {
     builder_.AddListeningPort(host + ":" + std::to_string(port),
@@ -354,7 +375,7 @@ class DefaultEmulatorServer : public EmulatorServer {
   void Wait() override { server_->Wait(); }
   bool HasValidServer() { return static_cast<bool>(server_); }
 
- private:
+ public: // FIXME: Changed to public for testing
   int bound_port_;
   std::shared_ptr<Cluster> cluster_;
   EmulatorService bt_service_;
@@ -364,31 +385,21 @@ class DefaultEmulatorServer : public EmulatorServer {
 };
 
 StatusOr<std::unique_ptr<EmulatorServer>> CreateDefaultEmulatorServer(
-    std::string const& host, std::uint16_t port) {
-  auto* default_emulator_server = new DefaultEmulatorServer(host, port);
+  std::string const& host, std::uint16_t port, const std::shared_ptr<Storage>& storage
+) {
+  
+  auto status = storage->Open();
+  if (!status.ok()) {
+    return status;
+  }
+
+  auto* default_emulator_server = new DefaultEmulatorServer(host, port, storage);
   if (!default_emulator_server->HasValidServer()) {
     return UnknownError("An unknown error occurred when starting server",
                         GCP_ERROR_INFO()
                             .WithMetadata("host", host)
                             .WithMetadata("port", absl::StrCat("%d", port)));
   }
-
-  rocksdb::DB* db;
-  rocksdb::Options options;
-  options.create_if_missing = true;
-
-  // Example code using rocksdb: Open database
-  rocksdb::Status status = rocksdb::DB::Open(options, "/tmp/rocksdb-for-bigtable", &db);
-  if (!status.ok()) {
-      std::cerr << "Error opening RocksDB: " << status.ToString() << "\n";
-      return UnknownError("Failed to open RocksDB",
-                          GCP_ERROR_INFO()
-                              .WithMetadata("host", host)
-                              .WithMetadata("port", absl::StrCat("%d", port)));
-  }
-
-
-
   return std::unique_ptr<EmulatorServer>(default_emulator_server);
 }
 

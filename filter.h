@@ -15,11 +15,11 @@
 #ifndef GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_FILTER_H
 #define GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_FILTER_H
 
+#include "google/cloud/status_or.h"
+#include "absl/types/internal/variant.h"
 #include "cell_view.h"
 #include "range_set.h"
-#include "google/cloud/status_or.h"
 #include <google/bigtable/v2/data.pb.h>
-#include "absl/types/internal/variant.h"
 #include <functional>
 #include <memory>
 #include <string>
@@ -164,6 +164,12 @@ class AbstractCellStreamImpl {
    *     what `HasValue()` will return.
    */
   virtual bool Next(NextMode mode) = 0;
+};
+
+class AbstractFamilyColumnStreamImpl : public AbstractCellStreamImpl {
+  public:
+    virtual std::string const& column_family_name() const = 0;
+    virtual ~AbstractFamilyColumnStreamImpl() = default;
 };
 
 /**
