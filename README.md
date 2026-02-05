@@ -35,7 +35,7 @@
   * Solved RocksDB TransactionDB column family creation constraints
   * Implemented server endpoints to use `PersistentTable` implementation
 * [Mikołaj Woliński](https://github.com/mik04rm)
-  * Minimal README updates
+  * Minimal README updates and some TODO fixes
 
 ### Implementation
 
