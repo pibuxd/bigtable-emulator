@@ -63,8 +63,8 @@ TEST(RocksDBStorage, TableRowsRead) {
 
   // Verify that we have new rows
   EXPECT_ROWS(m, table_name1, {"cf_1.row_1.col_1", t1, "value_1"});
-  EXPECT_ROWS(m, table_name2, {"cf_1.row_1.col_1", t1, "value_2a"},
-              {"cf_1.row_1.col_1", t2, "value_2b"},
+  EXPECT_ROWS(m, table_name2, {"cf_1.row_1.col_1", t2, "value_2b"},
+              {"cf_1.row_1.col_1", t1, "value_2a"},
               {"cf_1.row_1.col_2", t2, "value_3"});
 
   auto t3 = t++;

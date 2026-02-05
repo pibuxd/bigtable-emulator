@@ -85,7 +85,7 @@ class RocksDBColumnFamilyStream : public AbstractFamilyColumnStreamImpl {
   }
 
  private:
-  using TColumnRow = std::map<std::chrono::milliseconds, std::string>;
+  using TColumnRow = std::map<std::chrono::milliseconds, std::string, std::greater<>>;
   using TColumnFamilyRow = std::map<std::string, TColumnRow>;
 
   std::string column_family_name_;   /**< Column family name for this stream. */
