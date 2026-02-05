@@ -66,6 +66,8 @@ Data is stored within the `Table` and `ColumnFamily` hierarchy of classes in loc
 | 3     | `ColumnFamilyRow` | `column_family.h` | `columns_`       | column qualifier → `ColumnRow` |
 | 4     | `ColumnRow`       | `column_family.h` | `cells_`         | timestamp (`std::chrono::milliseconds`) → value (`std::string`); ordered by timestamp descending (`std::greater<>`). |
 
+![Storage diagram for RocksDB](https://github.com/pibuxd/bigtable-emulator/blob/implement-rocksdb-persistence/static/storage_diagram_mem.png?raw=true)
+
 ### RocksDBStorage: how data is stored 
 
 We have special column family called `"bte_metadata"` (configurable as many other parameters via `StorageRocksDBConfig`).
@@ -86,7 +88,12 @@ Data is grouped as follows:
 | Metadata CF (e.g. `bte_metadata`) | Table name (string)                  | Serialized `TableMeta` (table schema). |
 | Data CF (one per Bigtable column family) | `table_name \| row_key \| column_qualifier` | Serialized `RowData` (contains `RowColumnData`: map of timestamp_ms → value for that (row, column)). |
 
-So: Bigtable column family → RocksDB column family; (table, row, column_qualifier) → one RocksDB key; all timestamps for that (row, column) are stored in the single `RowData` protobuf value.
+*Summary:* 
+Bigtable column family → RocksDB column family
+(table, row, column_qualifier) → one RocksDB key
+all timestamps for that (row, column) are stored in the single `RowData` protobuf value.
+
+![Storage diagram for RocksDB](https://github.com/pibuxd/bigtable-emulator/blob/implement-rocksdb-persistence/static/storage_diagram_rdb.png?raw=true)
 
 This layout lets us read a single row at a time and stream through rows efficiently.
 
