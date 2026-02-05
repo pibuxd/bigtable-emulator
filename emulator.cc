@@ -17,7 +17,7 @@
 #include "absl/flags/usage.h"
 #include "absl/strings/str_cat.h"
 #include "persist/rocksdb/storage.h"
-#include "persist/logging.h"
+#include "persist/utils/logging.h"
 #include "server.h"
 #include <cstdint>
 #include <cstdlib>

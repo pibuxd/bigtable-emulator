@@ -14,7 +14,7 @@
 
 #include "persist/persisted_table.h"
 #include "google/cloud/internal/make_status.h"
-#include "persist/logging.h"
+#include "persist/utils/logging.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include <cmath>

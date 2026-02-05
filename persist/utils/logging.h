@@ -46,18 +46,4 @@ template <> struct fmt::formatter<google::bigtable::v2::Value::KindCase> : fmt::
   }
 };
 
-enum KindCase {
-  kRawValue = 8,
-  kRawTimestampMicros = 9,
-  kBytesValue = 2,
-  kStringValue = 3,
-  kIntValue = 6,
-  kBoolValue = 10,
-  kFloatValue = 11,
-  kTimestampValue = 12,
-  kDateValue = 13,
-  kArrayValue = 4,
-  KIND_NOT_SET = 0,
-};
-
 #endif  // GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_PERSIST_LOGGING_H

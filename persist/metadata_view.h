@@ -6,7 +6,7 @@
 #ifndef GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_METADATA_VIEW_H
 #define GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_METADATA_VIEW_H
 
-#include "persist/logging.h"
+#include "persist/utils/logging.h"
 #include "persist/proto/storage.pb.h"
 
 namespace google {

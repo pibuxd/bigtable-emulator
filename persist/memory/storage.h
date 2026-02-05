@@ -14,7 +14,7 @@
 #include "absl/types/optional.h"
 #include "filter.h"
 #include "google/protobuf/util/field_mask_util.h"
-#include "persist/logging.h"
+#include "persist/utils/logging.h"
 #include "persist/memory/storage_row_tx.h"
 #include "persist/metadata_view.h"
 #include "persist/proto/storage.pb.h"

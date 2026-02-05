@@ -245,16 +245,14 @@ class StorageTestManager {
    *
    * @param new_storage New storage shared pointer.
    */
-  inline void setStorage(std::shared_ptr<StorageT>&& new_storage) {
-    storage = std::move(new_storage);
-  }
+  void setStorage(std::shared_ptr<StorageT>&& new_storage);
 
  public:
   /// @brief Return the test table name prefix.
-  inline std::string const testTablePrefix() const { return test_table_prefix; }
+  std::string const testTablePrefix() const;
 
   /// @brief Return the underlying storage backend.
-  inline std::shared_ptr<StorageT> getStorage() const { return storage; }
+  std::shared_ptr<StorageT> getStorage() const;
 
   /**
    * @brief Build a fully-qualified table name for a short name.
@@ -262,9 +260,7 @@ class StorageTestManager {
    * @param name Short table name suffix.
    * @return Fully-qualified test table name.
    */
-  inline std::string testTableName(std::string const& name) const {
-    return absl::StrCat(testTablePrefix(), "/tables/", name);
-  }
+  std::string testTableName(std::string const& name) const;
 
   /**
    * @brief Start an `IntegrationServer` using the current storage backend.
@@ -273,9 +269,7 @@ class StorageTestManager {
    *
    * @return Newly started `IntegrationServer` instance.
    */
-  inline IntegrationServer RunServer() {
-    return IntegrationServer(test_table_uid, storage);
-  }
+  IntegrationServer RunServer();
 
   /**
    * @brief Dump all rows of a table into a `rows_dump` container.
@@ -283,19 +277,7 @@ class StorageTestManager {
    * @param table_name Fully-qualified table name.
    * @return Collected rows.
    */
-  inline rows_dump getTableRowsDump(std::string const& table_name) {
-    rows_dump vals;
-    auto stream = storage->StreamTableFull(table_name).value();
-    DBG("[TestUtils][getTableRowsDump] table={} stream.HasValue()={}",
-        table_name, stream.HasValue());
-    for (; stream.HasValue(); stream.Next(NextMode::kCell)) {
-      auto& v = stream.Value();
-      auto row_msg = absl::StrCat(v.column_family(), ".", v.row_key(), ".",
-                                  v.column_qualifier());
-      vals.push_back(std::make_tuple(row_msg, v.timestamp(), v.value()));
-    }
-    return vals;
-  }
+  rows_dump getTableRowsDump(std::string const& table_name);
 
   /**
    * @brief Create a new test table with optional column families.
@@ -303,25 +285,8 @@ class StorageTestManager {
    * @param column_family_names Names of column families to add to the schema.
    * @return Name of the created table.
    */
-  inline std::string createTestTable(
-      std::vector<std::string> const column_family_names = {}) {
-    auto const table_name =
-        testTableName(absl::StrCat("table_", test_table_uid));
-    ++test_table_uid;
-    ::google::bigtable::admin::v2::Table schema;
-    schema.set_name(table_name);
-    for (auto& column_family_name : column_family_names) {
-      (*schema.mutable_column_families())[column_family_name] =
-          ::google::bigtable::admin::v2::ColumnFamily();
-    }
-    auto create_table_status = storage->CreateTable(schema);
-    if (!create_table_status.ok()) {
-      DBG("[TestUtils][createTestTable] CreateTable failed table={} error={}",
-          table_name, create_table_status.message());
-    }
-    assert(create_table_status.ok());
-    return table_name;
-  }
+  std::string createTestTable(
+      std::vector<std::string> const column_family_names = {});
 
   /**
    * @brief Convert a millisecond duration to microseconds.
@@ -329,22 +294,14 @@ class StorageTestManager {
    * @param millis Duration in milliseconds.
    * @return Duration in microseconds.
    */
-  inline static uint64_t toMicros(std::chrono::milliseconds const& millis) {
-    return std::chrono::duration_cast<std::chrono::microseconds>(millis)
-        .count();
-  }
+  static uint64_t toMicros(std::chrono::milliseconds const& millis);
 
   /**
    * @brief Return the current wall-clock time in milliseconds since epoch.
    *
    * @return Current timestamp in milliseconds.
    */
-  inline std::chrono::milliseconds now() {
-    std::chrono::time_point<std::chrono::system_clock> now =
-        std::chrono::system_clock::now();
-    auto duration = now.time_since_epoch();
-    return std::chrono::duration_cast<std::chrono::milliseconds>(duration);
-  }
+  std::chrono::milliseconds now();
 };
 
 /**

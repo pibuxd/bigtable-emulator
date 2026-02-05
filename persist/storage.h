@@ -12,7 +12,7 @@
 #include "absl/flags/flag.h"
 #include "absl/strings/str_cat.h"
 #include "filter.h"
-#include "persist/logging.h"
+#include "persist/utils/logging.h"
 #include "persist/metadata_view.h"
 #include "persist/proto/storage.pb.h"
 #include "persist/storage_row_tx.h"

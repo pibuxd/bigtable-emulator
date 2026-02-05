@@ -37,7 +37,7 @@ bigtable_emulator_common_hdrs = [
     "persist/metadata_view.h",
     "persist/memory/storage.h",
     "persist/memory/storage_row_tx.h",
-    "persist/logging.h"
+    "persist/utils/logging.h",
 ]
 
 bigtable_emulator_common_srcs = [

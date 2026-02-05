@@ -12,7 +12,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/types/optional.h"
 #include "filter.h"
-#include "persist/logging.h"
+#include "persist/utils/logging.h"
 #include "persist/metadata_view.h"
 #include "persist/proto/storage.pb.h"
 #include "persist/rocksdb/column_family_stream.h"

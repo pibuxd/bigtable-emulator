@@ -18,7 +18,7 @@
  */
 
 #include "absl/strings/str_cat.h"
-#include "persist/logging.h"
+#include "persist/utils/logging.h"
 #include "persist/memory/storage.h"
 #include "persist/storage.h"
 
