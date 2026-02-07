@@ -263,7 +263,7 @@ clang-format -i -style=file -assume-filename=.clang-format **/*.cc **/*.h
 
 If you need to generate `compile_commands.json` for your tooling, run:
 ```shell
-bazel run --config=compile-commands
+bazel run --config=compile-commands @hedron_compile_commands//:refresh_all
 ```
 
 ## Contributing changes

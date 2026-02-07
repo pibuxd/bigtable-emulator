@@ -34,9 +34,6 @@ build:macos --copt=-mmacosx-version-min=10.13
 # the project separately.
 build --experimental_convenience_symlinks=ignore
 
-# Generate compile_commands.json for tools that require it.
-run:compile-commands --experimental_convenience_symlinks=normal @hedron_compile_commands//:refresh_all
-
 # We mirror critical tarballs from several sources in case the canonical source
 # is temporarily unavailable, e.g., github.com being down. This option and flag
 # automatically rewrites the URLs.
@@ -138,7 +135,7 @@ build:msan --linkopt=-L/usr/lib/x86_64-unknown-linux-gnu
 # build:otel2 --cxxopt=-DOPENTELEMETRY_ABI_VERSION_NO=2
 
 # Generate compile_commands.json for tools that require it.
-run:compile-commands --experimental_convenience_symlinks=normal @hedron_compile_commands//:refresh_all
+run:compile-commands --experimental_convenience_symlinks=normal
 # --config clang-tidy: clang-tidy
 build:clang-tidy --aspects @bazel_clang_tidy//clang_tidy:clang_tidy.bzl%clang_tidy_aspect
 build:clang-tidy --@bazel_clang_tidy//:clang_tidy_config=//:clang_tidy_config
