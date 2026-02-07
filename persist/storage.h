@@ -12,10 +12,10 @@
 #include "absl/flags/flag.h"
 #include "absl/strings/str_cat.h"
 #include "filter.h"
-#include "persist/utils/logging.h"
 #include "persist/metadata_view.h"
 #include "persist/proto/storage.pb.h"
 #include "persist/storage_row_tx.h"
+#include "persist/utils/logging.h"
 #include <google/bigtable/admin/v2/table.pb.h>
 #include <functional>
 #include <memory>
@@ -128,18 +128,20 @@ class Storage {
   virtual Status DeleteColumnFamily(std::string const& cf_name) = 0;
 
   /**
-  *  Returns a view of all table metadata.
-  *  Guarantees:
-  *   - Random const access iterator (specifically std continous range)
-  *   - Provides snapshot of tables when call to Tables() happened, even if mutations happen in meantime
-  */
+   *  Returns a view of all table metadata.
+   *  Guarantees:
+   *   - Random const access iterator (specifically std continous range)
+   *   - Provides snapshot of tables when call to Tables() happened, even if
+   * mutations happen in meantime
+   */
   virtual CachedTablesMetadataView Tables() const { return Tables(""); }
 
-  /** Returns a view of table metadata with keys starting with prefix. 
-  *  Guarantees:
-  *   - Random const access iterator (specifically std continous range)
-  *   - Provides snapshot of tables when call to Tables() happened, even if mutations happen in meantime
-  */
+  /** Returns a view of table metadata with keys starting with prefix.
+   *  Guarantees:
+   *   - Random const access iterator (specifically std continous range)
+   *   - Provides snapshot of tables when call to Tables() happened, even if
+   * mutations happen in meantime
+   */
   virtual CachedTablesMetadataView Tables(std::string const& prefix) const = 0;
 
   /** Streams all rows */

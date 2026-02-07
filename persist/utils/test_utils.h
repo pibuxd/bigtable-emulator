@@ -10,21 +10,17 @@
 #ifndef GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_PERSIST_UTILS_TEST_UTILS
 #define GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_PERSIST_UTILS_TEST_UTILS
 
-#include <gtest/gtest.h>
-
-#include "filter.h"
-#include "persist/memory/storage.h"
-#include "persist/rocksdb/storage.h"
-#include "server.h"
-
 #include "google/cloud/bigtable/admin/bigtable_table_admin_client.h"
 #include "google/cloud/bigtable/resource_names.h"
 #include "google/cloud/bigtable/table.h"
 #include "google/cloud/credentials.h"
-
+#include "filter.h"
 #include "fmt/format.h"
 #include "fmt/ranges.h"
-
+#include "persist/memory/storage.h"
+#include "persist/rocksdb/storage.h"
+#include "server.h"
+#include <gtest/gtest.h>
 #include <cassert>
 #include <chrono>
 #include <filesystem>
@@ -71,12 +67,12 @@
  *
  * @param VALUE Expression returning an object with `ok()` and `status()`.
  */
-#define EXPECT_OK_STATUS(VALUE)                                    \
-  if (true) {                                                      \
-    auto v = (VALUE);                                              \
-    if (!v.ok()) {                                                 \
-      EXPECT_EQ(fmt::format("{}", v.status()), "OK");              \
-    }                                                              \
+#define EXPECT_OK_STATUS(VALUE)                       \
+  if (true) {                                         \
+    auto v = (VALUE);                                 \
+    if (!v.ok()) {                                    \
+      EXPECT_EQ(fmt::format("{}", v.status()), "OK"); \
+    }                                                 \
   };
 
 /**
@@ -101,21 +97,22 @@
  * @param TABLE A `cbt::Table` instance.
  * @param ... Expected `(key, value)` pairs.
  */
-#define EXPECT_ROWS_CBT(TABLE, ...)                                                \
-  if (true) {                                                                      \
-    std::vector<std::pair<std::string, std::string>> dumped_rows;                 \
-    for (auto& row : (TABLE).ReadRows(cbt::RowRange::InfiniteRange(),             \
-                                      cbt::Filter::PassAllFilter())) {            \
-      EXPECT_OK_STATUS(row);                                                      \
-      for (cbt::Cell const& c : row->cells()) {                                   \
-        dumped_rows.push_back(std::make_pair(                                     \
-            fmt::format("{}.{}.{}", c.family_name(), c.row_key(),                 \
-                        c.column_qualifier()),                                    \
-            c.value()));                                                          \
-      }                                                                           \
-    }                                                                             \
-    EXPECT_EQ(dumped_rows,                                                        \
-              (std::vector<std::pair<std::string, std::string>>{__VA_ARGS__}));   \
+#define EXPECT_ROWS_CBT(TABLE, ...)                                        \
+  if (true) {                                                              \
+    std::vector<std::pair<std::string, std::string>> dumped_rows;          \
+    for (auto& row : (TABLE).ReadRows(cbt::RowRange::InfiniteRange(),      \
+                                      cbt::Filter::PassAllFilter())) {     \
+      EXPECT_OK_STATUS(row);                                               \
+      for (cbt::Cell const& c : row->cells()) {                            \
+        dumped_rows.push_back(                                             \
+            std::make_pair(fmt::format("{}.{}.{}", c.family_name(),        \
+                                       c.row_key(), c.column_qualifier()), \
+                           c.value()));                                    \
+      }                                                                    \
+    }                                                                      \
+    EXPECT_EQ(                                                             \
+        dumped_rows,                                                       \
+        (std::vector<std::pair<std::string, std::string>>{__VA_ARGS__}));  \
   }
 
 /**
@@ -123,8 +120,7 @@
  *
  * Useful in integration tests that need to wait for eventual consistency.
  */
-#define WAIT() \
-  std::this_thread::sleep_for(std::chrono::milliseconds(250));
+#define WAIT() std::this_thread::sleep_for(std::chrono::milliseconds(250));
 
 /**
  * @brief Helper macro to create a row transaction or fail the test.
@@ -135,14 +131,14 @@
  * @param STORAGE Pointer (or smart pointer) to a storage implementation.
  * @param ... Arguments forwarded to `RowTransaction`.
  */
-#define TXN(STORAGE, ...)                     \
-  ([&]() -> auto {                            \
+#define TXN(STORAGE, ...)                                   \
+  ([&]() -> auto {                                          \
     auto maybeTxn = (STORAGE)->RowTransaction(__VA_ARGS__); \
-    if (!maybeTxn.ok()) {                     \
-      LERROR("Transaction creation failed in test"); \
-      assert(false);                          \
-    }                                         \
-    return std::move(maybeTxn.value());       \
+    if (!maybeTxn.ok()) {                                   \
+      LERROR("Transaction creation failed in test");        \
+      assert(false);                                        \
+    }                                                       \
+    return std::move(maybeTxn.value());                     \
   }())
 
 namespace google {
@@ -184,8 +180,7 @@ class IntegrationServer {
    * @param test_uid Unique identifier used to select the listening port.
    * @param storage Shared pointer to the storage backend instance.
    */
-  explicit IntegrationServer(size_t test_uid,
-                             std::shared_ptr<Storage> storage);
+  explicit IntegrationServer(size_t test_uid, std::shared_ptr<Storage> storage);
 
   /**
    * @brief Build client options for connecting to the emulator server.
@@ -319,8 +314,7 @@ class MemoryStorageTestManager : public StorageTestManager<MemoryStorage> {
  * This helper manages creation of a temporary RocksDB database directory and
  * provides a `reconnect()` helper that reopens the database.
  */
-class RocksDBStorageTestManager
-    : public StorageTestManager<RocksDBStorage> {
+class RocksDBStorageTestManager : public StorageTestManager<RocksDBStorage> {
  private:
   storage::StorageRocksDBConfig storage_config;
   std::filesystem::path test_storage_path;
@@ -343,4 +337,3 @@ class RocksDBStorageTestManager
 }  // namespace google
 
 #endif  // GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_PERSIST_UTILS_TEST_UTILS
-

@@ -12,13 +12,13 @@
 #include "absl/strings/str_cat.h"
 #include "absl/types/optional.h"
 #include "filter.h"
-#include "persist/utils/logging.h"
 #include "persist/metadata_view.h"
 #include "persist/proto/storage.pb.h"
 #include "persist/rocksdb/column_family_stream.h"
 #include "persist/rocksdb/filtered_table_stream.h"
 #include "persist/rocksdb/storage_row_tx.h"
 #include "persist/storage.h"
+#include "persist/utils/logging.h"
 #include "rocksdb/db.h"
 #include "rocksdb/iterator.h"
 #include "rocksdb/options.h"
@@ -204,8 +204,9 @@ class RocksDBStorage : public Storage {
   /** @copydoc Storage::RowTransaction */
   virtual StatusOr<std::unique_ptr<StorageRowTX>> RowTransaction(
       std::string const& table_name, std::string const& row_key) {
-    return StatusOr<std::unique_ptr<StorageRowTX>>(std::unique_ptr<RocksDBStorageRowTX>(new RocksDBStorageRowTX(
-        table_name, row_key, StartRocksTransaction(), this)));
+    return StatusOr<std::unique_ptr<StorageRowTX>>(
+        std::unique_ptr<RocksDBStorageRowTX>(new RocksDBStorageRowTX(
+            table_name, row_key, StartRocksTransaction(), this)));
   }
 
   /** @copydoc Storage::Close */
@@ -436,8 +437,7 @@ class RocksDBStorage : public Storage {
       for (auto h : cf_handles) delete h;
       delete regular_db;
 
-      DBG("[RocksDBStorage][CreateTable] reopen table_name={}",
-          schema.name());
+      DBG("[RocksDBStorage][CreateTable] reopen table_name={}", schema.name());
       auto reopen_status = UncheckedOpen();
       if (!reopen_status.ok()) {
         return reopen_status;
@@ -500,9 +500,10 @@ class RocksDBStorage : public Storage {
         NotFoundError("No such table.",
                       GCP_ERROR_INFO().WithMetadata("table_name", table_name)));
     if (!status.ok()) {
-      LERROR("[RocksDBStorage][GetTableMeta] Get table failed table_name={} "
-             "status={}",
-             table_name, status.message());
+      LERROR(
+          "[RocksDBStorage][GetTableMeta] Get table failed table_name={} "
+          "status={}",
+          table_name, status.message());
       return Rollback(txn, status);
     }
     auto const meta = DeserializeTableMeta(std::move(out));
@@ -912,8 +913,9 @@ class RocksDBStorage : public Storage {
   inline StatusOr<storage::RowData> DeserializeRow(std::string&& data) const {
     storage::RowData row;
     if (!row.ParseFromString(data)) {
-      LERROR("[RocksDBStorage][DeserializeRow] ParseFromString failed data_len={}",
-             data.size());
+      LERROR(
+          "[RocksDBStorage][DeserializeRow] ParseFromString failed data_len={}",
+          data.size());
       return StorageError("DeserializeRow()");
     }
     return row;
@@ -931,9 +933,10 @@ class RocksDBStorage : public Storage {
       std::string&& data) {
     storage::TableMeta meta;
     if (!meta.ParseFromString(data)) {
-      LERROR("[RocksDBStorage][DeserializeTableMeta] ParseFromString failed "
-             "data_len={}",
-             data.size());
+      LERROR(
+          "[RocksDBStorage][DeserializeTableMeta] ParseFromString failed "
+          "data_len={}",
+          data.size());
       return StorageError("DeserializeTableMeta()");
     }
     assert(meta.has_table());
@@ -985,8 +988,8 @@ class RocksDBStorage : public Storage {
                                             storage_config.db_path(),
                                             column_families, handles, &db);
       if (!status.ok()) {
-        LWARN("[OpenDBWithRetry] failed DB open with retry path={} code={}", storage_config.db_path(),
-            (uint64_t)status.code());
+        LWARN("[OpenDBWithRetry] failed DB open with retry path={} code={}",
+              storage_config.db_path(), (uint64_t)status.code());
       }
       if (status.IsIOError()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(250));

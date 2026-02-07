@@ -18,9 +18,9 @@
  */
 
 #include "absl/strings/str_cat.h"
-#include "persist/utils/logging.h"
 #include "persist/memory/storage.h"
 #include "persist/storage.h"
+#include "persist/utils/logging.h"
 
 namespace google {
 namespace cloud {
@@ -112,7 +112,8 @@ Status MemoryStorageRowTX::SetCell(std::string const& column_family,
                                    std::chrono::milliseconds timestamp,
                                    std::string const& value) {
   DBG("[MemoryStorageRowTX][SetCell] table={} row={} cf={} cq={} ts={}",
-      table_name_, row_key_, column_family, column_qualifier, timestamp.count());
+      table_name_, row_key_, column_family, column_qualifier,
+      timestamp.count());
   auto status = table_->FindColumnFamily(column_family);
   if (!status.ok()) {
     return status.status();
@@ -143,7 +144,8 @@ StatusOr<absl::optional<std::string>> MemoryStorageRowTX::UpdateCell(
     std::function<StatusOr<std::string>(std::string const&,
                                         std::string&&)> const& update_fn) {
   DBG("[MemoryStorageRowTX][UpdateCell] table={} row={} cf={} cq={} ts={}",
-      table_name_, row_key_, column_family, column_qualifier, timestamp.count());
+      table_name_, row_key_, column_family, column_qualifier,
+      timestamp.count());
   auto status = table_->FindColumnFamily(column_family);
   if (!status.ok()) {
     return status.status();
@@ -189,7 +191,8 @@ Status MemoryStorageRowTX::DeleteRowColumn(
                                std::move(cell.value)};
     undo_.emplace(std::move(restore_value));
   }
-  DBG("[MemoryStorageRowTX][DeleteRowColumn] exit table={} row={} deleted_cells={}",
+  DBG("[MemoryStorageRowTX][DeleteRowColumn] exit table={} row={} "
+      "deleted_cells={}",
       table_name_, row_key_, deleted_cells.size());
   return Status();
 }
@@ -212,7 +215,8 @@ Status MemoryStorageRowTX::DeleteRowFromAllColumnFamilies() {
     }
   }
 
-  DBG("[MemoryStorageRowTX][DeleteRowFromAllColumnFamilies] exit row_existed={}",
+  DBG("[MemoryStorageRowTX][DeleteRowFromAllColumnFamilies] exit "
+      "row_existed={}",
       row_existed);
   if (row_existed) {
     return Status();

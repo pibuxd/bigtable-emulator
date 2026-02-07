@@ -14,9 +14,9 @@
 
 #include "persist/persisted_table.h"
 #include "google/cloud/internal/make_status.h"
-#include "persist/utils/logging.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
+#include "persist/utils/logging.h"
 #include <cmath>
 
 namespace google {
@@ -88,8 +88,8 @@ Status PersistedTable::MutateRow(
 Status PersistedTable::ReadRows(
     google::bigtable::v2::ReadRowsRequest const& request,
     RowStreamer& row_streamer) const {
-  DBG("[PersistedTable][ReadRows] table={} rows_limit={} has_filter={}",
-      name_, request.rows_limit(), request.has_filter());
+  DBG("[PersistedTable][ReadRows] table={} rows_limit={} has_filter={}", name_,
+      request.rows_limit(), request.has_filter());
   std::shared_ptr<StringRangeSet> row_set;
   if (request.has_rows() && (request.rows().row_ranges_size() > 0 ||
                              request.rows().row_keys_size() > 0)) {
@@ -232,8 +232,8 @@ Status PersistedTable::SampleRowKeys(
     writer->WriteLast(std::move(resp), opts);
   }
 
-  DBG("[PersistedTable][SampleRowKeys] exit table={} wrote_samples={}",
-      name_, wrote_a_sample);
+  DBG("[PersistedTable][SampleRowKeys] exit table={} wrote_samples={}", name_,
+      wrote_a_sample);
   return Status();
 }
 
@@ -257,10 +257,12 @@ Status PersistedTable::DoMutationsWithPossibleRollback(
 
   auto maybeTxn = storage_->RowTransaction(name_, row_key);
   if (!maybeTxn.ok()) {
-    LERROR("[PersistedTable][ReadModifyWriteRow] Failed to create row transaction status={}", maybeTxn.status());
-    return InternalError(
-      "failed to create row transaction with lock",
-      GCP_ERROR_INFO().WithMetadata("row_key", row_key));
+    LERROR(
+        "[PersistedTable][ReadModifyWriteRow] Failed to create row transaction "
+        "status={}",
+        maybeTxn.status());
+    return InternalError("failed to create row transaction with lock",
+                         GCP_ERROR_INFO().WithMetadata("row_key", row_key));
   }
   auto const& txn = maybeTxn.value();
 
@@ -345,9 +347,8 @@ Status PersistedTable::DoMutationsWithPossibleRollback(
               "[PersistedTable][DoMutationsWithPossibleRollback] unimplemented "
               "aggregation table={} row_key={} cf={} aggregator_case={}",
               name_, row_key, add_to_cell.family_name(),
-              static_cast<int>(cf_value_type.value()
-                                    .aggregate_type()
-                                    .aggregator_case()));
+              static_cast<int>(
+                  cf_value_type.value().aggregate_type().aggregator_case()));
           return UnimplementedError(
               "column family configured with unimplemented aggregation",
               GCP_ERROR_INFO()
@@ -527,10 +528,13 @@ PersistedTable::ReadModifyWriteRow(
 
   auto maybeTxn = storage_->RowTransaction(name_, request.row_key());
   if (!maybeTxn.ok()) {
-    LERROR("[PersistedTable][ReadModifyWriteRow] Failed to create row transaction status={}", maybeTxn.status());
+    LERROR(
+        "[PersistedTable][ReadModifyWriteRow] Failed to create row transaction "
+        "status={}",
+        maybeTxn.status());
     return InternalError(
-      "failed to create row transaction with lock",
-      GCP_ERROR_INFO().WithMetadata("request", request.DebugString()));
+        "failed to create row transaction with lock",
+        GCP_ERROR_INFO().WithMetadata("request", request.DebugString()));
   }
   auto const& txn = maybeTxn.value();
 
@@ -755,13 +759,12 @@ PersistedTable::CheckAndMutateRow(
 StatusOr<CellStream> PersistedTable::CreateCellStream(
     std::shared_ptr<StringRangeSet> range_set,
     absl::optional<google::bigtable::v2::RowFilter> maybe_row_filter) const {
-  
-
   auto maybeStream = storage_->StreamTable(name_, range_set, false);
   if (!maybeStream.ok()) {
     LERROR(
-      "[PersistedTable][CreateCellStream] Failes to create stream for table name={}",
-      name_);
+        "[PersistedTable][CreateCellStream] Failes to create stream for table "
+        "name={}",
+        name_);
     return maybeStream.status();
   }
 
@@ -1023,9 +1026,7 @@ Status PersistedTable::DropRowRange(
   }
 
   if (row_key_prefix.empty()) {
-    LERROR(
-        "[PersistedTable][DropRowRange] row prefix empty table={}",
-        name_);
+    LERROR("[PersistedTable][DropRowRange] row prefix empty table={}", name_);
     return InvalidArgumentError(
         "Row prefix provided is empty.",
         GCP_ERROR_INFO().WithMetadata("DropRowRange request",

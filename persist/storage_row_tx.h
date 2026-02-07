@@ -86,9 +86,9 @@ class StorageRowTX {
    * @param end End of range (exclusive).
    */
   virtual Status DeleteRowColumn(std::string const& column_family,
-                         std::string const& column_qualifier,
-                         std::chrono::milliseconds& start,
-                         std::chrono::milliseconds& end) {
+                                 std::string const& column_qualifier,
+                                 std::chrono::milliseconds& start,
+                                 std::chrono::milliseconds& end) {
     ::google::bigtable::v2::TimestampRange t_range;
     t_range.set_start_timestamp_micros(
         std::chrono::duration_cast<std::chrono::microseconds>(start).count());
@@ -105,8 +105,8 @@ class StorageRowTX {
    * @param value The timestamp of the cell to delete.
    */
   virtual Status DeleteRowColumn(std::string const& column_family,
-                         std::string const& column_qualifier,
-                         std::chrono::milliseconds& value) {
+                                 std::string const& column_qualifier,
+                                 std::chrono::milliseconds& value) {
     std::chrono::milliseconds value_end = value;
     ++value_end;
     return this->DeleteRowColumn(column_family, column_qualifier, value,

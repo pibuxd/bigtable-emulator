@@ -16,6 +16,7 @@ namespace cloud {
 namespace bigtable {
 namespace emulator {
 
+// clang-format off
 /**
   * This is very similar to FilteredTableStream.
   * We didn't want to move all the files to persist/ directory, because that would make diff
@@ -30,6 +31,7 @@ namespace emulator {
   *
   * TODO: This could be turned into templated class in the future
   */
+// clang-format on
 class StorageFitleredTableStream : public MergeCellStreams {
  public:
   /**

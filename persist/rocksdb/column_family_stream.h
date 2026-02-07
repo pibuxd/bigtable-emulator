@@ -88,19 +88,23 @@ class RocksDBColumnFamilyStream : public AbstractFamilyColumnStreamImpl {
   using TColumnRow = std::map<std::chrono::milliseconds, std::string>;
   using TColumnFamilyRow = std::map<std::string, TColumnRow>;
 
-  std::string column_family_name_;   /**< Column family name for this stream. */
-  std::string table_name_;           /**< Table name. */
-  bool const prefetch_all_columns_;  /**< If true, load all columns per row. */
+  std::string column_family_name_;  /**< Column family name for this stream. */
+  std::string table_name_;          /**< Table name. */
+  bool const prefetch_all_columns_; /**< If true, load all columns per row. */
   rocksdb::ColumnFamilyHandle* handle_; /**< RocksDB column family handle. */
-  std::shared_ptr<StringRangeSet const> row_ranges_; /**< Row keys to include. */
-  std::vector<std::shared_ptr<re2::RE2 const>> row_regexes_; /**< Row key regexes. */
-  mutable StringRangeSet column_ranges_;   /**< Column qualifier ranges. */
-  std::vector<std::shared_ptr<re2::RE2 const>> column_regexes_; /**< Column regexes. */
+  std::shared_ptr<StringRangeSet const>
+      row_ranges_; /**< Row keys to include. */
+  std::vector<std::shared_ptr<re2::RE2 const>>
+      row_regexes_;                      /**< Row key regexes. */
+  mutable StringRangeSet column_ranges_; /**< Column qualifier ranges. */
+  std::vector<std::shared_ptr<re2::RE2 const>>
+      column_regexes_;                         /**< Column regexes. */
   mutable TimestampRangeSet timestamp_ranges_; /**< Timestamp filter. */
-  RocksDBStorage* db_;               /**< Backing RocksDB storage. */
+  RocksDBStorage* db_;                         /**< Backing RocksDB storage. */
   mutable rocksdb::Iterator* row_iter_; /**< Iterator over raw row keys. */
-  mutable std::string row_key_;     /**< Current row key (when row_data_ set). */
-  mutable absl::optional<TColumnFamilyRow> row_data_; /**< Current row's columns/cells. */
+  mutable std::string row_key_; /**< Current row key (when row_data_ set). */
+  mutable absl::optional<TColumnFamilyRow>
+      row_data_; /**< Current row's columns/cells. */
 
   /**
    * Advances to the next row in the row set; updates row_key_ and row_data_

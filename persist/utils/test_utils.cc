@@ -56,8 +56,7 @@ rows_dump StorageTestManager<StorageT>::getTableRowsDump(
 template <typename StorageT>
 std::string StorageTestManager<StorageT>::createTestTable(
     std::vector<std::string> const column_family_names) {
-  auto const table_name =
-      testTableName(absl::StrCat("table_", test_table_uid));
+  auto const table_name = testTableName(absl::StrCat("table_", test_table_uid));
   ++test_table_uid;
   ::google::bigtable::admin::v2::Table schema;
   schema.set_name(table_name);
@@ -125,10 +124,10 @@ IntegrationServer::~IntegrationServer() { Kill(); }
 cbt::Table IntegrationServer::Table(std::string project_id,
                                     std::string instance_id,
                                     std::string table_id) {
-  return cbt::Table(cbt::MakeDataConnection(getClientOptions()),
-                    cbt::TableResource(std::move(project_id),
-                                       std::move(instance_id),
-                                       std::move(table_id)));
+  return cbt::Table(
+      cbt::MakeDataConnection(getClientOptions()),
+      cbt::TableResource(std::move(project_id), std::move(instance_id),
+                         std::move(table_id)));
 }
 
 cbta::BigtableTableAdminClient IntegrationServer::Client() {
@@ -146,7 +145,7 @@ MemoryStorageTestManager::MemoryStorageTestManager() {
 
 RocksDBStorageTestManager::RocksDBStorageTestManager() {
   test_storage_path = (std::filesystem::temp_directory_path() /= "bte_test") /=
-                      std::tmpnam(nullptr);
+      std::tmpnam(nullptr);
   // Attempt to create the directory.
   std::filesystem::create_directories(test_storage_path);
 
@@ -174,4 +173,3 @@ Status RocksDBStorageTestManager::reconnect() {
 }  // namespace bigtable
 }  // namespace cloud
 }  // namespace google
-

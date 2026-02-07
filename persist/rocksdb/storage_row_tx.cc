@@ -134,7 +134,8 @@ Status RocksDBStorageRowTX::SetCell(std::string const& column_family,
                                     std::chrono::milliseconds timestamp,
                                     std::string const& value) {
   DBG("[RocksDBStorageRowTX][SetCell] table={} row={} cf={} cq={} ts={}",
-      table_name_, row_key_, column_family, column_qualifier, timestamp.count());
+      table_name_, row_key_, column_family, column_qualifier,
+      timestamp.count());
   auto status = LoadRow(column_family, column_qualifier);
   if (!status.ok()) {
     return status;
@@ -152,7 +153,8 @@ StatusOr<absl::optional<std::string>> RocksDBStorageRowTX::UpdateCell(
     std::function<StatusOr<std::string>(std::string const&,
                                         std::string&&)> const& update_fn) {
   DBG("[RocksDBStorageRowTX][UpdateCell] table={} row={} cf={} cq={} ts={}",
-      table_name_, row_key_, column_family, column_qualifier, timestamp.count());
+      table_name_, row_key_, column_family, column_qualifier,
+      timestamp.count());
   auto status = LoadRow(column_family, column_qualifier);
   if (!status.ok()) {
     return status;
@@ -207,7 +209,8 @@ Status RocksDBStorageRowTX::DeleteRowColumn(
     if (in_range) {
       DBG("[RocksDBStorageRowTX][DeleteRowColumn] erased cell table={} row={} "
           "cf={} cq={} cell_ts={}",
-          table_name_, row_key_, column_family, column_qualifier, cell_timestamp);
+          table_name_, row_key_, column_family, column_qualifier,
+          cell_timestamp);
       cell_it = cells.erase(cell_it);
     } else {
       DBG("[RocksDBStorageRowTX][DeleteRowColumn] preserved cell table={} "

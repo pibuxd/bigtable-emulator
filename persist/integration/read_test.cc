@@ -31,25 +31,28 @@ TEST(IntegrationTest, Read) {
   auto& families = *t.mutable_column_families();
   families["fam"].mutable_gc_rule()->set_max_num_versions(10);
 
-  auto maybe_create = client.CreateTable(cbt::InstanceName("project1", "instance1"), "table1", std::move(t));
+  auto maybe_create = client.CreateTable(
+      cbt::InstanceName("project1", "instance1"), "table1", std::move(t));
   EXPECT_OK_STATUS(maybe_create);
 
   auto table = server.Table("project1", "instance1", "table1");
 
-  std::vector<std::string> greetings{"Hello World!", "Hello Cloud Bigtable!", "Hello C++!"};
+  std::vector<std::string> greetings{"Hello World!", "Hello Cloud Bigtable!",
+                                     "Hello C++!"};
   int i = 0;
   for (auto const& greeting : greetings) {
     std::string row_key = "key-" + std::to_string(i);
     google::cloud::Status status = table.Apply(cbt::SingleRowMutation(
-    std::move(row_key), cbt::SetCell("fam", "c0", greeting)));
+        std::move(row_key), cbt::SetCell("fam", "c0", greeting)));
     EXPECT_OK(status);
     ++i;
   }
 
   WAIT();
 
-  EXPECT_ROWS_CBT(table, {"fam.key-0.c0", "Hello World!"}, {"fam.key-1.c0", "Hello Cloud Bigtable!"}, {"fam.key-2.c0", "Hello C++!"});
-
+  EXPECT_ROWS_CBT(table, {"fam.key-0.c0", "Hello World!"},
+                  {"fam.key-1.c0", "Hello Cloud Bigtable!"},
+                  {"fam.key-2.c0", "Hello C++!"});
 }
 
 }  // anonymous namespace

@@ -75,11 +75,11 @@ class RocksDBStorageRowTX : public StorageRowTX {
                  std::string const& column_qualifier);
 
  private:
-  rocksdb::Transaction* txn_;   /**< RocksDB transaction for this row. */
+  rocksdb::Transaction* txn_;     /**< RocksDB transaction for this row. */
   rocksdb::ReadOptions roptions_; /**< Read options for snapshot/consistency. */
-  std::string const row_key_;   /**< Row key for this transaction. */
-  std::string const table_name_; /**< Table name for this transaction. */
-  RocksDBStorage* db_;           /**< Backing RocksDB storage. */
+  std::string const row_key_;     /**< Row key for this transaction. */
+  std::string const table_name_;  /**< Table name for this transaction. */
+  RocksDBStorage* db_;            /**< Backing RocksDB storage. */
 
   /** Key used to fetch row data: [column_family, column_qualifier]. */
   using row_data_key_t = std::tuple<std::string, std::string>;

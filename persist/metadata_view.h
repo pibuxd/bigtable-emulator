@@ -6,8 +6,8 @@
 #ifndef GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_METADATA_VIEW_H
 #define GOOGLE_CLOUD_CPP_GOOGLE_CLOUD_BIGTABLE_EMULATOR_METADATA_VIEW_H
 
-#include "persist/utils/logging.h"
 #include "persist/proto/storage.pb.h"
+#include "persist/utils/logging.h"
 
 namespace google {
 namespace cloud {
@@ -17,12 +17,13 @@ namespace emulator {
 /**
  * This class represents cached list of tuples of tables' names and their
  * metadata. Should be returned by Tables() method in abstract class Storage().
- * We chose to use such a simple wrapper to make it easier to deal with polymorphism on iterators
- * returned by abstract Storage class.
+ * We chose to use such a simple wrapper to make it easier to deal with
+ * polymorphism on iterators returned by abstract Storage class.
  *
  * Storage::Tables() guarantees:
  *  - Random const access iterator (specifically std continous range)
- *  - Provides snapshot of tables when call to Tables() happened, even if mutations happen in meantime
+ *  - Provides snapshot of tables when call to Tables() happened, even if
+ * mutations happen in meantime
  */
 class CachedTablesMetadataView {
  public:
