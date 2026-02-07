@@ -340,6 +340,59 @@ Status Table::Update(google::bigtable::admin::v2::Table const& new_schema,
   return Status();
 }
 
+Status Table::ApplySchema(google::bigtable::admin::v2::Table const& new_schema) {
+  std::unique_lock<std::mutex> lock(mu_);
+  auto new_column_families = column_families_;
+
+  // Drop column families removed from the schema.
+  for (auto it = new_column_families.begin(); it != new_column_families.end();) {
+    if (new_schema.column_families().find(it->first) ==
+        new_schema.column_families().end()) {
+      it = new_column_families.erase(it);
+    } else {
+      ++it;
+    }
+  }
+
+  // Add or update column families defined in the schema.
+  for (auto const& cf_def : new_schema.column_families()) {
+    auto cf_it = new_column_families.find(cf_def.first);
+    if (cf_it == new_column_families.end()) {
+      absl::optional<google::bigtable::admin::v2::Type> value_type =
+          absl::nullopt;
+      absl::optional<google::bigtable::admin::v2::GcRule> gc_rule =
+          absl::nullopt;
+
+      if (cf_def.second.has_value_type()) {
+        value_type = cf_def.second.value_type();
+      }
+      if (cf_def.second.has_gc_rule()) {
+        gc_rule = cf_def.second.gc_rule();
+        auto status = CheckGCRuleIsValid(gc_rule.value());
+        if (!status.ok()) {
+          return status;
+        }
+      }
+
+      auto maybe_cf = ColumnFamily::ConstructColumnFamily(value_type, gc_rule);
+      if (!maybe_cf) {
+        return maybe_cf.status();
+      }
+      new_column_families.emplace(cf_def.first, std::move(maybe_cf.value()));
+    } else if (cf_def.second.has_gc_rule()) {
+      auto status = CheckGCRuleIsValid(cf_def.second.gc_rule());
+      if (!status.ok()) {
+        return status;
+      }
+      cf_it->second->SetGCRule(cf_def.second.gc_rule());
+    }
+  }
+
+  column_families_.swap(new_column_families);
+  schema_ = new_schema;
+  return Status();
+}
+
 template <typename MESSAGE>
 StatusOr<std::reference_wrapper<ColumnFamily>> Table::FindColumnFamily(
     MESSAGE const& message) const {

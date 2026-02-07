@@ -79,6 +79,10 @@ class Table : public std::enable_shared_from_this<Table> {
   Status Update(google::bigtable::admin::v2::Table const& new_schema,
                 google::protobuf::FieldMask const& to_update);
 
+  // Apply a fully constructed schema to the in-memory table, updating
+  // column family runtime state to match the schema.
+  Status ApplySchema(google::bigtable::admin::v2::Table const& new_schema);
+
   StatusOr<google::bigtable::admin::v2::Table> ModifyColumnFamilies(
       google::bigtable::admin::v2::ModifyColumnFamiliesRequest const& request);
 

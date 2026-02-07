@@ -203,13 +203,7 @@ class MemoryStorage : public Storage {
     if (!maybe_table.ok()) {
       return maybe_table.status();
     }
-    google::protobuf::FieldMask allowed_mask;
-    FieldMaskUtil::FromString(
-        "change_stream_config,"
-        "change_stream_config.retention_period,"
-        "deletion_protection",
-        &allowed_mask);
-    return (*maybe_table)->Update(meta.table(), allowed_mask);
+    return (*maybe_table)->ApplySchema(meta.table());
   };
   /** Ensures the given column families exist (no-op for in-memory storage). */
   virtual Status EnsureColumnFamiliesExist(

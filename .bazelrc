@@ -27,7 +27,7 @@ build:macos --cxxopt=-std=c++17
 build:linux --host_cxxopt=-std=c++17
 build:macos --host_cxxopt=-std=c++17
 
-build:macos --copt=-mmacosx-version-min=10.13
+build:macos --copt=-mmacosx-version-min=10.15
 
 # Do not create the convenience links. They are inconvenient when the build
 # runs inside a docker image or if one builds a quickstart and then builds
