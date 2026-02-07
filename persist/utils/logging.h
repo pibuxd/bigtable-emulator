@@ -4,16 +4,48 @@
 #include "google/cloud/status.h"
 #include "fmtlog-inl.h"
 #include <google/bigtable/v2/data.pb.h>
+#include <algorithm>
+#include <cctype>
+#include <string>
 #include <string_view>
 
 #define DBG(...) logd(__VA_ARGS__)
 #define LERROR(...) loge(__VA_ARGS__)
 #define LWARN(...) logw(__VA_ARGS__)
 
-static inline void ConfigureEmulatorLogging() {
-  fmtlog::setLogFile("emulator.log", false);
-  fmtlog::setLogLevel(fmtlog::WRN);
+static inline fmtlog::LogLevel ParseLogLevel(std::string level) {
+  std::transform(level.begin(), level.end(), level.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
+  if (level == "dbg" || level == "debug") {
+    return fmtlog::DBG;
+  }
+  if (level == "info" || level == "inf") {
+    return fmtlog::INF;
+  }
+  if (level == "warn" || level == "warning" || level == "wrn") {
+    return fmtlog::WRN;
+  }
+  if (level == "err" || level == "error") {
+    return fmtlog::ERR;
+  }
+  return fmtlog::WRN;
+}
+
+static inline void ConfigureEmulatorLogging(std::string const& log_path,
+                                            std::string const& log_level) {
+  fmtlog::setLogFile(log_path.c_str(), false);
+  fmtlog::setLogLevel(ParseLogLevel(log_level));
+  fmtlog::flushOn(fmtlog::WRN);
+  fmtlog::setFlushDelay(200000000);  // 200ms
   fmtlog::setThreadName("main");
+  // Start background polling to flush logs to file periodically.
+  fmtlog::startPollingThread(100000000);  // 100ms
+}
+
+static inline void ShutdownEmulatorLogging() {
+  fmtlog::poll(true);
+  fmtlog::stopPollingThread();
+  fmtlog::closeLogFile();
 }
 
 // Custom fmt formatter for status
