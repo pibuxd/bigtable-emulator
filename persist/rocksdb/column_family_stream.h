@@ -13,6 +13,7 @@
 #include "re2/re2.h"
 #include "rocksdb/iterator.h"
 #include <chrono>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -85,7 +86,9 @@ class RocksDBColumnFamilyStream : public AbstractFamilyColumnStreamImpl {
   }
 
  private:
-  using TColumnRow = std::map<std::chrono::milliseconds, std::string>;
+  // using TColumnRow = std::map<std::chrono::milliseconds, std::string>;
+  using TColumnRow =
+      std::map<std::chrono::milliseconds, std::string, std::greater<>>;
   using TColumnFamilyRow = std::map<std::string, TColumnRow>;
 
   std::string column_family_name_;  /**< Column family name for this stream. */
